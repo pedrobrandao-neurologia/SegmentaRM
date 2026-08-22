@@ -248,7 +248,7 @@ async function inferenceFullVolumeSeqCovLayerPhase2(
       callbackUI('Layer ' + i.toString(), (i + 1) / layersLength)
       if (tf.memory().unreliable) {
         const unreliableReasons = 'unreliable reasons :' + tf.memory().reasons
-        callbackUI(unreliableReasons, NaN, unreliableReasons)
+        callbackUI(unreliableReasons, NaN) // aviso informativo: no backend de CPU tf.memory() é sempre "unreliable"
       }
       if (i === layersLength - 2) {
         // Stop before the last layer or classification layer.
@@ -412,7 +412,7 @@ async function inferenceFullVolumeSeqCovLayerPhase2(
     )
     if (tf.memory().unreliable) {
       const unreliableReasons = 'unreliable reasons :' + tf.memory().reasons
-      callbackUI(unreliableReasons, NaN, unreliableReasons)
+      callbackUI(unreliableReasons, NaN) // aviso informativo: no backend de CPU tf.memory() é sempre "unreliable"
     }
   }
 }
@@ -603,7 +603,7 @@ async function inferenceFullVolumePhase2(
       curTensor[i - 1].dispose()
       if (tf.memory().unreliable) {
         const unreliableReasons = 'unreliable reasons :' + tf.memory().reasons
-        callbackUI(unreliableReasons, NaN, unreliableReasons)
+        callbackUI(unreliableReasons, NaN) // aviso informativo: no backend de CPU tf.memory() é sempre "unreliable"
       }
 
       if (i === layersLength - 1) {
@@ -976,7 +976,7 @@ async function inferenceFullVolumePhase1(
         callbackUI('Layer ' + i.toString(), (i + 1) / layersLength)
         if (tf.memory().unreliable) {
           const unreliableReasons = 'unreliable reasons :' + tf.memory().reasons
-          callbackUI(unreliableReasons, NaN, unreliableReasons)
+          callbackUI(unreliableReasons, NaN) // aviso informativo: no backend de CPU tf.memory() é sempre "unreliable"
         }
 
         if (i === layersLength - 1) {
