@@ -1,14 +1,16 @@
 {
-  "name": "Morfometria local",
-  "short_name": "Morfometria",
-  "description": "Segmentação e volumetria de RM encefálica executadas no próprio dispositivo.",
+  "name": "SegmentaRM — segmentação e volumetria de RM",
+  "short_name": "SegmentaRM",
+  "description": "Converte DICOM, segmenta o encéfalo e exporta estatísticas em CSV, JSON, SPSS e PDF — tudo no dispositivo.",
+  "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0B1014",
-  "theme_color": "#0B1014",
-  "orientation": "any",
+  "background_color": "#F3F0EA",
+  "theme_color": "#B5433A",
   "icons": [
-    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

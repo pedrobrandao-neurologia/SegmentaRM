@@ -1,170 +1,129 @@
-# Morfometria local
+# SegmentaRM
 
-PWA que segmenta RM encefálica e calcula volumes por estrutura **inteiramente no navegador**.
-Nenhuma imagem é enviada para servidor algum. Feito no espírito do `brain2print` e do `brainchop`,
-mas orientado a relatório volumétrico: aseg + parcelação cortical, cerebelo, tronco encefálico,
-entrada por pasta DICOM e exportação em CSV, JSON, SPSS (`.sav`) e NIfTI.
+PWA que converte **DICOM**, segmenta o encéfalo e calcula **volumetria por estrutura**
+inteiramente no navegador — nenhuma imagem sai do dispositivo. Construído no espírito do
+[brainchop](https://github.com/neuroneural/brainchop) e do
+[brain2print](https://github.com/niivue/brain2print), mas orientado a relatório volumétrico:
+**aparc+aseg com hemisférios, cerebelo (córtex/substância branca E/D), tronco encefálico e
+corpo caloso**, com exportação em **CSV, JSON, SPSS (.sav), PDF e NIfTI**.
 
-> **Uso em pesquisa e ensino.** Não é dispositivo médico, não tem registro ANVISA e não substitui
-> leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
-
----
-
-## O que já está pronto e o que falta
-
-| Peça | Situação |
-|---|---|
-| Leitura de pasta DICOM (VR explícito/implícito, little endian), agrupamento por série, ordenação por posição, montagem do affine LPS→RAS | pronto |
-| Leitura e escrita de NIfTI-1, incluindo `.nii.gz` | pronto |
-| Reamostragem para grade isotrópica de 1 mm alinhada a RAS, normalização robusta por percentis | pronto |
-| Inferência ONNX em blocos com sobreposição, argmax progressivo, WebGPU com queda para CPU | pronto |
-| Fusão de segmentações (cerebelo e tronco sobrescrevendo a aseg) | pronto |
-| Volumetria, índice de assimetria, agregados derivados | pronto |
-| Visualizador ortogonal com sobreposição e leitura do rótulo sob o cursor | pronto |
-| Exportação CSV / JSON / `.sav` / NIfTI e acúmulo de coorte | pronto |
-| Armazenamento dos modelos no dispositivo (OPFS) e funcionamento offline | pronto |
-| **Os pesos dos modelos em ONNX** | **você precisa converter** |
-
-O aplicativo não embarca nenhum modelo. Os pesos do SynthSeg são distribuídos pelos autores
-sob os termos deles, e a conversão precisa rodar na sua máquina.
+> **Uso em pesquisa e ensino.** Não é dispositivo médico, não tem registro ANVISA e não
+> substitui leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
 
 ---
 
-## Converter o SynthSeg
+## O fluxo
 
-```bash
-git clone https://github.com/BBillot/SynthSeg
-# baixe os pesos conforme o README do repositório (vão para SynthSeg/models/)
-pip install tensorflow tf2onnx onnx onnxruntime numpy
-
-python tools/convert_synthseg.py \
-  --model  SynthSeg/models/synthseg_2.0.h5 \
-  --labels SynthSeg/data/labels_classes_priors/synthseg_segmentation_labels_2.0.npy \
-  --out    build/synthseg_aseg \
-  --name   "SynthSeg 2.0 aseg"
+```
+Pasta DICOM ──dcm2niix (WASM)──▶ NIfTI ──┐
+Arquivo .nii/.nii.gz ────────────────────┤
+                                         ▼
+                       Régua de qualidade (A–D)
+                       voxel · anisotropia · nº de cortes · FOV · contraste · campo
+                                         ▼
+              ┌── nível A/B ── pipeline padrão (conformação direta)
+              └── nível C/D ── pipeline robusto:
+                    reamostragem cúbica Catmull-Rom → isotrópico 1 mm
+                    correção homomórfica de campo de viés
+                    suavização leve (opcional)
+                                         ▼
+                    Conformação 256³ · 1 mm (estilo FreeSurfer, via NiiVue)
+                                         ▼
+                    Segmentação — worker brainchop (MeshNet, TensorFlow.js)
+                                         ▼
+        Estatísticas: volumes, % do encéfalo, hemisférios, lobos, índice de assimetria
+                                         ▼
+            CSV · JSON · SPSS .sav · PDF · NIfTI (.nii.gz) · pacote .zip · coorte
 ```
 
-O script gera `synthseg_aseg.onnx` e `synthseg_aseg.json`. Arraste **os dois juntos** para o slot
-"Segmentação principal". Para a versão com parcelação cortical, use `synthseg_parc_2.0.h5` com o
-`.npy` de rótulos correspondente.
+### Modelos embarcados (brainchop, licença MIT)
 
-O `.json` é o contrato entre o modelo e o aplicativo:
+| Opção na interface | Pasta | Classes |
+|---|---|---|
+| **Aparc+Aseg 104** (padrão) | `models/model21_104class` | Córtex Desikan-Killiany **por hemisfério**, subcortical E/D, **cerebelo córtex/SB E/D**, **tronco encefálico**, ventrículos, **corpo caloso em 5 segmentos** |
+| Aparc+Aseg 50 | `models/model30chan50cls` | Parcelação cortical + subcortical sem separar hemisférios |
+| Subcortical 18 | `models/model30chan18cls` | aseg compacta: tálamo, gânglios da base, hipocampo, amígdala, cerebelo, tronco |
+| Tecidos | `models/model20chan3cls` | Cinzenta / branca |
+| Máscara encefálica | `models/model5_gw_ae` / `model11_gw_ae` | Skull stripping |
 
-```jsonc
-{
-  "name": "SynthSeg 2.0 aseg",
-  "task": "segment",         // ou "regress" para o SynthSR
-  "layout": "NDHWC",         // "NCDHW" para modelos exportados do PyTorch
-  "inputName": "input",
-  "outputName": "unet_prediction",
-  "tile": 0,                 // 0 = volume inteiro; 96 ou 128 se faltar memória
-  "overlap": 16,
-  "labels": [0, 2, 3, ...]   // labels[i] = rótulo FreeSurfer do canal i
-}
+Cada modelo tem variantes de memória normal/baixa (convolução sequencial na última camada).
+A primeira execução baixa <1 MB de pesos; o service worker guarda tudo e o aplicativo
+funciona **offline** depois disso.
+
+### O modo robusto não é o SynthSR
+
+Quando a régua marca C/D (FLAIR axial de 5 mm, poucos cortes, baixo campo), o ramo robusto
+aplica métodos **clássicos** — reamostragem cúbica, correção homomórfica de viés — inspirados
+no *papel* do SynthSR dentro do `recon-all-clinical`, mas sem a rede: reamostrar não cria
+informação. O relatório e o JSON registram o nível de qualidade e o pipeline usado; para
+inferência individual em exame anisotrópico, seja conservador.
+
+---
+
+## Exportações
+
+- **CSV** longo (uma linha por estrutura/agregado/assimetria; separador decimal configurável para Excel pt-BR ou R/Python)
+- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria, qualidade, ressalvas)
+- **SPSS `.sav`** — escritor próprio de system file com nomes longos (registro 7/13), rótulos de variável em português com acentos (UTF-8) e missing como sysmis; abre no SPSS, `haven::read_sav()` e `pyreadstat`
+- **PDF** — relatório com captura do visualizador, régua de qualidade, agregados, tabela por estrutura, escada de assimetria e página de métodos
+- **NIfTI** — segmentação e volume conformado em `.nii.gz`
+- **Pacote `.zip`** com tudo
+- **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav` para SPSS/R
+
+### Usar no R
+
+```r
+library(dplyr); library(haven)
+vol <- read_sav("coorte_volumes.sav")
+vol |> mutate(across(-c(subject, BrainSegVol), ~ .x / BrainSegVol * 100, .names = "pct_{.col}"))
 ```
-
-Se a lista `labels` estiver na ordem errada, a segmentação sai plausível e completamente trocada —
-é o erro mais fácil de cometer e o mais difícil de perceber. Por isso o script lê o `.npy` oficial
-e confere o número de canais.
-
-### Cerebelo e tronco encefálico
-
-O SynthSeg entrega o cerebelo como cortical/branca por hemisfério e o tronco como rótulo único (16).
-Para subdividir:
-
-- **Cerebelo:** o CerebNet, módulo do FastSurfer (`Deep-MI/FastSurfer`), é PyTorch e exporta com
-  `torch.onnx.export`. Use `"layout": "NCDHW"` e a LUT do próprio CerebNet.
-- **Tronco:** o `segmentBS` do FreeSurfer é bayesiano, não é rede — não há conversão direta.
-  As alternativas realistas hoje são treinar/obter uma rede própria ou o NextBrain, que é pesado
-  demais para o navegador. O slot existe e funciona com qualquer ONNX que produza os rótulos
-  173/174/175/178; até lá, deixe vazio.
-
-O aplicativo aceita qualquer inteiro como rótulo. Para nomes e cores corretos de um modelo novo,
-carregue o `FreeSurferColorLUT.txt` (ou a LUT do modelo) em **Ajustes**.
 
 ---
 
 ## Rodar
 
-Precisa ser servido por HTTP — módulos ES e service worker não funcionam em `file://`.
+Precisa de HTTP (módulos ES + service worker não funcionam em `file://`):
 
 ```bash
 python3 -m http.server 8080     # http://localhost:8080
 ```
 
-Para publicar no GitHub Pages, basta commitar a pasta: é tudo estático. O ONNX Runtime vem de CDN
-na primeira execução e fica em cache pelo service worker; os modelos ficam no OPFS. Depois disso o
-aplicativo funciona sem rede.
+**GitHub Pages:** o repositório é 100% estático — ative Pages na branch e pronto.
+Tudo (NiiVue, dcm2niix WASM, TensorFlow.js, modelos, fontes) está vendorizado; não há CDN.
 
----
-
-## Limites que você vai encontrar
-
-**Memória.** Uma U-Net a 192³ com 24 canais na resolução plena usa ~680 MB por tensor de ativação,
-e a saída com 98 rótulos passa de 2,8 GB. O WASM tem teto de 4 GB; no WebGPU o
-`maxStorageBufferBindingSize` costuma ficar bem abaixo disso. Se der erro de alocação, reduza a
-grade para 160³ e coloque `"tile": 96` no descritor.
-
-**Convolução 3D.** É cidadã de segunda classe nos runtimes web. Espere de 1 a 4 minutos com WebGPU
-numa máquina boa e de 15 a 45 minutos em CPU. O badge no topo da barra lateral mostra o que o seu
-navegador oferece.
-
-**DICOM comprimido.** JPEG, JPEG-LS, JPEG 2000 e RLE não são decodificados. O aplicativo avisa e
-pede conversão prévia com `dcm2niix`. A maior parte da RM de rotina sai em VR explícito não
-comprimido e passa direto.
-
-**Espessura cortical e superfícies.** Não estão aqui e não vão estar: dependem de geometria e
-topologia (`recon-all-clinical`), que é C++ pesado. Isto é volumetria.
-
-**Exame anisotrópico.** Reamostrar um FLAIR de 5 mm para 1 mm não cria informação. Os volumes
-servem para estudo de grupo com N grande; para leitura individual, seja conservador e sempre
-reporte a sequência e a resolução de origem.
-
----
-
-## Usar os resultados no R
-
-```r
-library(dplyr); library(tidyr); library(readr)
-
-vol <- read_csv("coorte_volumes.csv")           # formato largo, uma linha por exame
-
-# normalizar pelo volume cerebral segmentado
-vol_norm <- vol |>
-  mutate(across(-c(subject, BrainSegVol), ~ .x / BrainSegVol * 100, .names = "pct_{.col}"))
-
-# assimetria de estruturas pareadas
-assim <- vol |>
-  transmute(subject,
-            AI_hipocampo = 200 * (`Left-Hippocampus` - `Right-Hippocampus`) /
-                                 (`Left-Hippocampus` + `Right-Hippocampus`))
-```
-
-O `.sav` sai com nomes longos no registro 7/13, então abre no SPSS, no `haven::read_sav()` e no
-`pyreadstat` com os nomes das estruturas preservados.
-
----
+O botão **Exemplo** carrega um T1 real 256³ (do brain2print, MIT) para demonstrar o fluxo completo.
 
 ## Estrutura
 
 ```
-index.html            interface e estilos
-app.js                orquestração
-lib/dicom.js          leitor de séries DICOM não comprimidas
-lib/nifti.js          leitura e escrita NIfTI-1
-lib/resample.js       reamostragem afim, conform, normalização
-lib/infer.js          ONNX Runtime, inferência em blocos
-lib/stats.js          volumetria, fusão, assimetria, CSV/JSON
-lib/sav.js            escritor SPSS .sav
-lib/lut.js            rótulos, cores, pares contralaterais
-lib/viewer.js         visualizador ortogonal
-tools/convert_synthseg.py   conversão Keras → ONNX + descritor
-sw.js                 cache offline
+index.html · styles.css · app.js     interface e orquestração
+lib/quality.js                       régua de qualidade A–D
+lib/stats.js · lib/labels.js         volumetria, hemisférios, lobos, assimetria, nomes em pt-BR
+lib/sav.js                           escritor SPSS .sav
+lib/pdf.js · lib/report.js           gerador de PDF e relatório
+lib/nifti-writer.js · lib/zip.js     NIfTI-1 e ZIP
+workers/preprocess.worker.js         modo robusto (reamostragem cúbica + correção de viés)
+brainchop/                           worker de inferência do brain2print (MIT), tfjs vendorizado
+models/                              pesos MeshNet do brainchop (MIT)
+vendor/                              NiiVue, dcm2niix WASM, TensorFlow.js, fontes
+tools/convert_synthseg.py            conversor Keras→ONNX da iteração anterior (opcional)
+sw.js · manifest.webmanifest         PWA offline
 ```
+
+## Limites
+
+- **Espessura cortical e superfícies** não estão aqui: dependem de geometria/topologia
+  (`recon-all-clinical`). Isto é volumetria.
+- **Memória/GPU**: a inferência usa WebGL; em GPUs integradas use os modelos compactos ou a
+  variante de memória baixa. CPU funciona, mas é lenta.
+- **DICOM**: o dcm2niix WASM embarcado decodifica também séries JPEG; séries muito exóticas
+  podem exigir conversão prévia no desktop.
+- Os modelos foram treinados em **T1**; T2/FLAIR degradam o resultado (a régua avisa).
 
 ## Créditos
 
-SynthSeg e SynthSR: Billot, Iglesias e colaboradores, Martinos Center (MGH/Harvard).
-Cite os artigos originais em qualquer trabalho que use as segmentações.
-A ideia de rodar segmentação 3D no navegador vem do `brainchop` (Masoud, Hu & Plis) e do
-`brain2print` (grupo do Chris Rorden).
+- **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT): worker de inferência e modelos.
+- **NiiVue** e **dcm2niix** — Rorden e colaboradores.
+- Linhagem conceitual: **SynthSeg / SynthSR / recon-all-clinical** — Billot, Gopinath, Iglesias
+  e colaboradores, Martinos Center (MGH/Harvard). Cite os artigos originais em trabalhos que
+  usem as segmentações.
