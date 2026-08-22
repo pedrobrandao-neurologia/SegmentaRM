@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Morfometria local — segmentação e volumetria no navegador</title>
+<meta name="description" content="Segmentação volumétrica e estatísticas morfométricas de RM encefálica, executadas inteiramente no seu dispositivo.">
+<meta name="theme-color" content="#0B1014">
+<link rel="manifest" href="./manifest.webmanifest">
+<style>
+:root{
+  --void:#0B1014; --panel:#121B21; --panel-2:#18242B; --line:#24343D;
+  --ink:#DCE7EB; --dim:#7E939D; --faint:#4C6069;
+  --teal:#5BC8C0; --amber:#D9A441; --red:#D96A5B;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,"Cascadia Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--void); color:var(--ink); font-family:var(--sans);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--teal)}
+
+/* ---------- estrutura ---------- */
+.shell{display:grid;grid-template-columns:340px minmax(0,1fr);min-height:100vh}
+.rail{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.stage{padding:26px 30px 80px;min-width:0}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .rail{border-right:0;border-bottom:1px solid var(--line)}
+  .stage{padding:20px 16px 60px}
+}
+
+/* ---------- cabeçalho ---------- */
+.brand{padding:22px 22px 18px;border-bottom:1px solid var(--line)}
+.brand h1{
+  margin:0;font-size:21px;font-weight:300;letter-spacing:-.02em;line-height:1.15;
+}
+.brand h1 em{font-style:normal;color:var(--teal)}
+.brand p{margin:8px 0 0;color:var(--dim);font-size:12px;line-height:1.45}
+.badge{
+  display:inline-flex;gap:6px;align-items:center;margin-top:12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--teal);border:1px solid rgba(91,200,192,.3);border-radius:var(--r);padding:3px 7px;
+}
+.badge::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--teal)}
+
+/* ---------- passos ---------- */
+.steps{flex:1;overflow-y:auto}
+.step{border-bottom:1px solid var(--line);padding:18px 22px}
+.step > h2{
+  margin:0 0 12px;font-family:var(--mono);font-size:10px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  display:flex;align-items:baseline;gap:9px;
+}
+.step > h2 b{color:var(--teal);font-weight:500}
+.step[data-state="done"] > h2 b{color:var(--amber)}
+
+.field{margin-bottom:11px}
+.field:last-child{margin-bottom:0}
+.field > label{display:block;font-size:11px;color:var(--dim);margin-bottom:5px}
+.row{display:flex;gap:8px}
+.row > *{flex:1;min-width:0}
+
+.btn{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 12px;cursor:pointer;text-align:left;width:100%;
+  transition:border-color .14s,background .14s;
+}
+.btn:hover{border-color:var(--faint);background:#1D2C34}
+.btn:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--teal);color:#07110F;border-color:var(--teal);font-weight:600;text-align:center}
+.btn.primary:hover{background:#6FD8D0}
+.btn.ghost{background:transparent}
+.btn.small{padding:6px 9px;font-size:12px;width:auto}
+
+select,input[type=text],input[type=number]{
+  width:100%;background:var(--void);border:1px solid var(--line);
+  border-radius:var(--r);padding:8px 9px;font-family:var(--mono);font-size:12px;
+}
+select:focus,input:focus{outline:none;border-color:var(--teal)}
+
+.drop{
+  border:1px dashed var(--line);border-radius:var(--r);padding:18px 14px;text-align:center;
+  cursor:pointer;transition:border-color .14s,background .14s;
+}
+.drop:hover,.drop.over{border-color:var(--teal);background:rgba(91,200,192,.05)}
+.drop strong{display:block;font-size:13px;font-weight:500}
+.drop span{display:block;color:var(--dim);font-size:11px;margin-top:4px}
+
+/* fatia de modelo */
+.slot{border:1px solid var(--line);border-radius:var(--r);padding:10px;margin-bottom:8px;background:var(--void)}
+.slot header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.slot header h3{margin:0;font-size:12px;font-weight:500}
+.slot .state{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.slot .state[data-on="1"]{color:var(--teal)}
+.slot footer{display:flex;gap:6px;margin-top:8px}
+.slot p{margin:6px 0 0;font-size:11px;color:var(--dim)}
+
+/* ---------- log ---------- */
+.console{
+  border-top:1px solid var(--line);background:#0D1519;padding:12px 22px 16px;
+  font-family:var(--mono);font-size:11px;color:var(--dim);max-height:190px;overflow-y:auto;
+}
+.console p{margin:0 0 3px;white-space:pre-wrap;word-break:break-word}
+.console p.err{color:var(--red)}
+.console p.ok{color:var(--teal)}
+.bar{height:2px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:9px}
+.bar i{display:block;height:100%;background:var(--teal);width:0;transition:width .2s}
+
+/* ---------- palco ---------- */
+.stage h2.title{
+  margin:0 0 3px;font-size:26px;font-weight:300;letter-spacing:-.02em;
+}
+.stage .lede{margin:0 0 22px;color:var(--dim);max-width:64ch;font-size:13px}
+
+.empty{
+  border:1px solid var(--line);border-radius:var(--r);padding:44px 28px;text-align:center;color:var(--dim);
+}
+.empty strong{display:block;color:var(--ink);font-weight:400;font-size:16px;margin-bottom:6px}
+
+.eyebrow{
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin:30px 0 12px;display:flex;align-items:center;gap:10px;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+.eyebrow:first-child{margin-top:0}
+
+.planes{display:flex;gap:14px;flex-wrap:wrap}
+.plane{margin:0}
+.plane canvas{display:block;background:#000;border:1px solid var(--line);border-radius:var(--r);cursor:crosshair;max-width:100%}
+.plane figcaption{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:6px}
+.viewer-tools{display:flex;gap:16px;align-items:center;margin-top:14px;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+.viewer-tools input[type=range]{width:130px;accent-color:var(--teal)}
+#hover{font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+/* escada bilateral — elemento assinatura */
+.ladder{width:100%;overflow-x:auto}
+.ladder svg{display:block;min-width:520px;width:100%}
+.ladder .lname{font-family:var(--mono);font-size:10px;fill:var(--dim)}
+.ladder .lval{font-family:var(--mono);font-size:9px;fill:var(--faint)}
+.ladder .axis{stroke:var(--line);stroke-width:1}
+.ladder .barL{fill:var(--teal)}
+.ladder .barR{fill:var(--amber)}
+.ladder .ai{font-family:var(--mono);font-size:9px}
+.legend{display:flex;gap:16px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.legend i{display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:1px;vertical-align:-1px}
+
+/* tabela */
+.tablewrap{border:1px solid var(--line);border-radius:var(--r);overflow:auto;max-height:520px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:7px 11px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+thead th{
+  position:sticky;top:0;background:var(--panel);z-index:1;
+  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:500;
+}
+td.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+tbody tr:hover{background:rgba(91,200,192,.05)}
+tr.groupsep td{background:var(--panel-2);font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.swatch{display:inline-block;width:8px;height:8px;border-radius:1px;margin-right:7px;vertical-align:0}
+
+.exports{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.queue{font-size:12px;color:var(--dim);margin-top:10px}
+.warn{
+  border-left:2px solid var(--amber);background:rgba(217,164,65,.07);
+  padding:10px 13px;font-size:12px;color:var(--ink);border-radius:0 var(--r) var(--r) 0;margin-bottom:16px;
+}
+.warn b{color:var(--amber);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <h1>Morfometria <em>local</em></h1>
+      <p>Segmenta a RM e calcula os volumes dentro do seu navegador. Nenhuma imagem sai do dispositivo.</p>
+      <span class="badge" id="device-badge">verificando o dispositivo</span>
+    </div>
+
+    <div class="steps">
+      <section class="step" id="step-input">
+        <h2><b>01</b> Imagem</h2>
+        <div class="field">
+          <div class="drop" id="drop">
+            <strong>Solte a pasta DICOM ou um .nii/.nii.gz</strong>
+            <span>ou clique para escolher</span>
+          </div>
+          <input type="file" id="file-nifti" accept=".nii,.nii.gz,.gz" hidden>
+          <input type="file" id="file-dicom" webkitdirectory directory multiple hidden>
+        </div>
+        <div class="row">
+          <button class="btn small" id="pick-folder">Escolher pasta</button>
+          <button class="btn small" id="pick-file">Escolher arquivo</button>
+        </div>
+        <div class="field" id="series-field" hidden>
+          <label for="series">Série</label>
+          <select id="series"></select>
+        </div>
+        <div class="field">
+          <label for="subject">Identificação do exame</label>
+          <input type="text" id="subject" placeholder="ex.: PD-014_baseline">
+        </div>
+      </section>
+
+      <section class="step" id="step-models">
+        <h2><b>02</b> Modelos</h2>
+        <div id="slots"></div>
+        <p style="font-size:11px;color:var(--dim);margin:6px 0 0">
+          Modelos ONNX ficam guardados no dispositivo e continuam disponíveis offline.
+        </p>
+      </section>
+
+      <section class="step" id="step-run">
+        <h2><b>03</b> Processamento</h2>
+        <div class="row field">
+          <div>
+            <label for="grid">Grade</label>
+            <select id="grid">
+              <option value="192">192³ · 1 mm</option>
+              <option value="160">160³ · 1 mm</option>
+              <option value="256">256³ · 1 mm</option>
+            </select>
+          </div>
+          <div>
+            <label for="device">Execução</label>
+            <select id="device">
+              <option value="auto">Automática</option>
+              <option value="webgpu">WebGPU</option>
+              <option value="wasm">CPU (WASM)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="etiv">eTIV para normalizar (mm³, opcional)</label>
+          <input type="number" id="etiv" placeholder="deixe vazio para usar o volume segmentado">
+        </div>
+        <button class="btn primary" id="run" disabled>Segmentar</button>
+      </section>
+
+      <section class="step" id="step-extra">
+        <h2><b>04</b> Ajustes</h2>
+        <div class="field">
+          <button class="btn small" id="load-lut">Carregar FreeSurferColorLUT.txt</button>
+          <input type="file" id="file-lut" accept=".txt" hidden>
+        </div>
+        <div class="field">
+          <label for="ort-url">URL do ONNX Runtime (opcional)</label>
+          <input type="text" id="ort-url" placeholder="deixe vazio para usar o CDN padrão">
+        </div>
+        <div class="field">
+          <label for="decimal">Separador decimal do CSV</label>
+          <select id="decimal">
+            <option value=".">ponto (R, Python)</option>
+            <option value=",">vírgula (Excel pt-BR)</option>
+          </select>
+        </div>
+      </section>
+    </div>
+
+    <div class="console" id="console">
+      <div class="bar"><i id="progress"></i></div>
+      <p>Pronto para começar.</p>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <div class="warn">
+      <b>Uso em pesquisa e ensino.</b> Esta ferramenta não é um dispositivo médico e não substitui
+      a leitura radiológica. Confira sempre a segmentação sobre a imagem antes de usar os números.
+    </div>
+
+    <h2 class="title" id="stage-title">Nenhum exame carregado</h2>
+    <p class="lede" id="stage-lede">
+      Carregue uma pasta DICOM ou um NIfTI, registre os modelos ONNX e execute. O resultado é um mapa de
+      rótulos sobre a imagem, uma tabela de volumes por estrutura e a exportação em CSV, JSON, SPSS e NIfTI.
+    </p>
+
+    <div id="results" hidden>
+      <div class="eyebrow">Segmentação</div>
+      <div class="planes" id="planes"></div>
+      <div class="viewer-tools">
+        <label>Opacidade <input type="range" id="opacity" min="0" max="100" value="45"></label>
+        <span id="hover">—</span>
+      </div>
+
+      <div class="eyebrow">Volumes por estrutura, esquerda contra direita</div>
+      <div class="legend">
+        <span><i style="background:var(--teal)"></i>esquerda</span>
+        <span><i style="background:var(--amber)"></i>direita</span>
+        <span>IA = 200·(E−D)/(E+D)</span>
+      </div>
+      <div class="ladder" id="ladder"></div>
+
+      <div class="eyebrow">Tabela</div>
+      <div class="row" style="display:flex;gap:8px;margin-bottom:10px;max-width:520px">
+        <input type="text" id="filter" placeholder="filtrar estrutura…">
+        <select id="group-filter" style="max-width:220px"><option value="">todos os grupos</option></select>
+      </div>
+      <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+
+      <div class="exports">
+        <button class="btn small" data-export="csv">Baixar CSV</button>
+        <button class="btn small" data-export="json">Baixar JSON</button>
+        <button class="btn small" data-export="sav">Baixar SPSS (.sav)</button>
+        <button class="btn small" data-export="nii">Baixar segmentação (.nii)</button>
+        <button class="btn small" data-export="queue">Adicionar à coorte</button>
+        <button class="btn small ghost" data-export="cohort" disabled>Exportar coorte</button>
+      </div>
+      <p class="queue" id="queue">Coorte vazia.</p>
+    </div>
+  </main>
+</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

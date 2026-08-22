@@ -1,0 +1,17 @@
+{
+  "name": "SynthSeg 2.0 aseg (exemplo)",
+  "task": "segment",
+  "layout": "NDHWC",
+  "inputName": "input",
+  "outputName": "unet_prediction",
+  "tile": 0,
+  "overlap": 16,
+  "labels": [0, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 24, 26, 28,
+             41, 42, 43, 44, 46, 47, 49, 50, 51, 52, 53, 54, 58, 60],
+  "_comentario": [
+    "labels[i] = rótulo FreeSurfer do canal i da saída. A ordem tem que ser exatamente",
+    "a do modelo: use tools/convert_synthseg.py, que lê o .npy oficial e preenche isto.",
+    "tile 0 = manda o volume inteiro de uma vez. Use 96 ou 128 se faltar memória.",
+    "layout NCDHW para modelos exportados do PyTorch (ex.: CerebNet)."
+  ]
+}
