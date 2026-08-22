@@ -1,49 +1,48 @@
-// sw.js — cache do app shell para funcionar offline.
-// Os modelos ONNX ficam no OPFS, não aqui.
-const CACHE = 'neurovol-v1';
+// Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
+// entram no cache na primeira utilização (cache-first).
+
+const CACHE = 'segmentarm-v1'
 const SHELL = [
-  './', './index.html', './app.js', './manifest.webmanifest',
-  './lib/nifti.js', './lib/dicom.js', './lib/resample.js',
-  './lib/infer.js', './lib/stats.js', './lib/sav.js',
-  './lib/lut.js', './lib/viewer.js',
-];
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './manifest.webmanifest',
+  './icons/icon.svg',
+  './lib/labels.js', './lib/quality.js', './lib/stats.js', './lib/nifti-writer.js',
+  './lib/sav.js', './lib/pdf.js', './lib/zip.js', './lib/report.js',
+  './workers/preprocess.worker.js',
+  './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',
+  './brainchop/tensor-utils.js', './brainchop/bwlabels.js',
+  './vendor/niivue.js', './vendor/tf.fesm.min.js',
+  './vendor/dcm2niix/index.jpeg.js', './vendor/dcm2niix/worker.jpeg.js',
+  './vendor/dcm2niix/dcm2niix.jpeg.js', './vendor/dcm2niix/dcm2niix.jpeg.wasm',
+  './vendor/fonts/archivo-var.woff2', './vendor/fonts/source-sans-3-var.woff2',
+  './vendor/fonts/jetbrains-mono-var.woff2'
+]
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
-});
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()))
+})
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
-  );
-});
+  )
+})
 
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  const isRuntime = /cdn\.jsdelivr\.net|unpkg\.com/.test(url.hostname);
-  if (e.request.method !== 'GET') return;
-
-  if (isRuntime) {
-    // ONNX Runtime: cache-first, para a segunda execução funcionar sem rede.
-    e.respondWith(
-      caches.open(CACHE).then(async (c) => {
-        const hit = await c.match(e.request);
-        if (hit) return hit;
-        const res = await fetch(e.request);
-        if (res.ok) c.put(e.request, res.clone());
-        return res;
-      })
-    );
-    return;
-  }
-
-  if (url.origin !== self.location.origin) return;
+  if (e.request.method !== 'GET') return
+  const url = new URL(e.request.url)
+  if (url.origin !== location.origin) return
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone()));
-      return res;
-    }).catch(() => caches.match('./index.html')))
-  );
-});
+    caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
+      if (resp.ok) {
+        const copy = resp.clone()
+        caches.open(CACHE).then(c => c.put(e.request, copy))
+      }
+      return resp
+    }))
+  )
+})
