@@ -814,6 +814,7 @@ async function main () {
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js').catch(() => {})
   }
+  window.__segrm = state // gancho de diagnóstico (console do navegador)
   log('SegmentaRM ' + VERSION + ' pronto. Nenhuma imagem sai do dispositivo.')
 }
 
