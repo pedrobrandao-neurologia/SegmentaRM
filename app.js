@@ -356,11 +356,14 @@ async function runBrainExtraction (conformed, isGPU, variant) {
   } else {
     log('Extração cerebral (≈ BET): inferindo probabilidade de cérebro…')
     // isScalar devolve a softmax de "cérebro" (0–255) em vez do argmax;
-    // type Segmentation evita a binarização do caminho Brain_Masking do worker
-    prob = await runBrainchopModel(MODEL_MAP.mask[variant], conformed, isGPU, 0.55, 0.72,
+    // type Segmentation evita a binarização do caminho Brain_Masking do worker.
+    // Sempre o modelo FAST (id 12): o caminho de subvolumes dos modelos de
+    // memória baixa ignora isScalar e devolveria só o argmax binário.
+    prob = await runBrainchopModel(MODEL_MAP.mask.high, conformed, isGPU, 0.55, 0.72,
       { entryPatch: { isScalar: true, type: 'Segmentation' } }).seg
   }
   const m = await runMaskWorker({ prob, intensity: conformed.img, dims: dimsOf(conformed), f, normalize: $('opt-norm').checked })
+  if (!m.voxels) throw new Error(`extração cerebral produziu máscara vazia (f=${f}) — reduza o limiar f ou desmarque a extração cerebral`)
   state.bet = { mask: new Uint8Array(m.mask), brain: new Uint8Array(m.brain), f, voxels: m.voxels, normalized: !!m.normalized, cleanupLog: m.log }
   const cm3 = m.voxels / 1000
   if (cm3 < 700) log(`Máscara pequena (${cm3.toFixed(0)} cm³) — limiar f=${f} pode estar alto; confira a sobreposição.`, 'err')
