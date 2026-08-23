@@ -58,13 +58,17 @@ Duas camadas ausentes no tfjs foram implementadas em `lib/tfjs-upsampling3d.js`
 ### Parcelação cortical DKT sobre o SynthSeg
 
 A parcelação DKT é um **passo separado** (04 · Parcelação DKT), aplicado sobre um resultado
-SynthSeg já pronto — se algo falhar, a segmentação feita permanece intacta e não é preciso
-reprocessar. O esquema replica o `--parc` do SynthSeg 2.0 (`predict_synthseg.py`:
-`mask = (seg==3)|(seg==42); seg[mask] = parcelação[mask]`), no espírito do `aparc` do
-FastSurfer: a fonte da parcelação é a rede DKT embarcada (aparc+aseg 104 do brainchop, MIT)
-rodada sobre o mesmo volume conformado; voxels de córtex sem parcela recebem a parcela modal
-da vizinhança por propagação (`lib/dkt-fusion.js`). Estruturas ausentes num sujeito são
-aceitas — a contagem de rótulos menor que a esperada é aviso, não erro.
+**SynthSeg** ou **Subcortical 18 (aseg compacta)** já pronto — se algo falhar, a segmentação
+feita permanece intacta e não é preciso reprocessar. O esquema replica o `--parc` do
+SynthSeg 2.0 (`predict_synthseg.py`: `mask = (seg==3)|(seg==42); seg[mask] = parcelação[mask]`),
+no espírito do `aparc` do FastSurfer: a fonte da parcelação é a rede DKT embarcada
+(aparc+aseg 104 do brainchop, MIT) rodada sobre o mesmo volume conformado; voxels de córtex
+sem parcela recebem a parcela modal da vizinhança por propagação (`lib/dkt-fusion.js`).
+No SynthSeg, o hemisfério do córtex vem da própria segmentação (E=2/D=19, a autoridade,
+como no mascaramento oficial); na aseg compacta o córtex é bilateral, e o hemisfério de
+cada voxel vem da rede DKT (com propagação para os voxels que ela não parcelou).
+Estruturas ausentes num sujeito são aceitas — a contagem de rótulos menor que a esperada
+é aviso, não erro.
 
 ### Modelos embarcados (brainchop, licença MIT)
 

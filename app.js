@@ -365,10 +365,27 @@ async function applySegmentationResult (labelsPath, colormapPath) {
 }
 
 // ---------- passo adicional: parcelação DKT sobre um resultado SynthSeg pronto ----------
+// fontes que aceitam o passo DKT e como fundir cada uma
+const DKT_SOURCES = {
+  synthseg: {
+    pt: 'SynthSeg 1.0',
+    fuse: { leftCtx: 2, rightCtx: 19, lhBase: 31, rhBase: 65 }, // córtex E/D do SynthSeg manda no hemisfério
+    labels: './models/synthseg1/labels_dkt.json',
+    colormap: './models/synthseg1/colormap_dkt.json'
+  },
+  aseg18: {
+    pt: 'Subcortical 18 (aseg compacta)',
+    fuse: { leftCtx: -1, rightCtx: -1, bothCtx: 2, lhBase: 17, rhBase: 51 }, // córtex bilateral: hemisfério vem da rede DKT
+    labels: './models/model30chan18cls/labels_dkt.json',
+    colormap: './models/model30chan18cls/colormap_dkt.json'
+  }
+}
+
 async function runDktStep () {
   if (state.running) return
-  if (!state.seg || state.segKind !== 'synthseg') {
-    log('O passo DKT parcela um resultado SynthSeg pronto — rode o SynthSeg primeiro.', 'err')
+  const src = DKT_SOURCES[state.segKind]
+  if (!state.seg || !src) {
+    log('O passo DKT parcela um resultado SynthSeg ou aseg compacta pronto — rode a segmentação primeiro.', 'err')
     return
   }
   state.running = true
@@ -377,19 +394,20 @@ async function runDktStep () {
   try {
     const isGPU = $('backend').value !== 'cpu'
     const variant = $('mem').value === 'low' ? 'low' : 'high'
-    log('Parcelação DKT (passo adicional): a segmentação SynthSeg atual fica preservada até a fusão dar certo.')
+    log(`Parcelação DKT (passo adicional): a segmentação ${src.pt} atual fica preservada até a fusão dar certo.`)
     const segDkt = await runBrainchopModel(variant === 'low' ? 15 : 14, state.conformed, isGPU, 0.1, 0.85).seg
-    log('Fundindo a parcelação DKT na fita cortical do SynthSeg (esquema do predict_synthseg: seg==córtex recebe a parcela)…')
-    const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed))
+    log('Fundindo a parcelação DKT na fita cortical (esquema do predict_synthseg: seg==córtex recebe a parcela)…')
+    const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed), src.fuse)
     const s = fused.stats
     // só troca o estado depois da fusão completa
+    const prevKind = state.segKind
     state.seg = fused.seg
-    state.segKind = 'synthseg-dkt'
-    state.modelUsed = 'SynthSeg 1.0 + parcelação DKT (passo adicional)'
+    state.segKind = prevKind + '-dkt'
+    state.modelUsed = `${src.pt} + parcelação DKT (passo adicional)`
     log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
-    await applySegmentationResult('./models/synthseg1/labels_dkt.json', './models/synthseg1/colormap_dkt.json')
+    await applySegmentationResult(src.labels, src.colormap)
   } catch (e) {
-    log('Erro no passo DKT — o resultado SynthSeg permanece intacto: ' + e.message, 'err')
+    log(`Erro no passo DKT — o resultado ${src.pt} permanece intacto: ` + e.message, 'err')
     progress(0)
     $('run-dkt').disabled = false
   } finally {
@@ -446,7 +464,7 @@ async function runSegmentation () {
     }
     state.seg = seg
     state.segKind = kind
-    $('run-dkt').disabled = kind !== 'synthseg'
+    $('run-dkt').disabled = !DKT_SOURCES[kind]
     await applySegmentationResult(labelsPath, colormapPath)
   } catch (e) {
     log('Erro: ' + e.message, 'err')
