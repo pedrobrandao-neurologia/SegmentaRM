@@ -90,6 +90,19 @@ inferência individual em exame anisotrópico, seja conservador.
 
 ---
 
+### Comparação normativa (QC, não clínico)
+
+Informando **idade e sexo**, o aplicativo compara os volumes com as curvas populacionais dos
+**brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
+[brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e vendorizados
+em `models/normative/brainchart.json`): **percentil e z-score do valor previsto** para volumes
+globais (GMV, WMV, cinzenta subcortical, ventrículos, cérebro total), **volume cortical por
+lobo** (frontal, parietal, temporal, occipital, ínsula, cíngulo — E/D e total, após o passo DKT)
+e parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 é sinalizado como possível
+erro de segmentação** no painel e no PDF (banner "verificar segmentação"). As normas foram
+ajustadas em volumes FreeSurfer harmonizados; os volumes daqui vêm do SynthSeg/DKT — a
+comparação é uma aproximação para triagem/QC, não para uso clínico.
+
 ## Exportações
 
 - **CSV** longo (uma linha por estrutura/agregado/assimetria; separador decimal configurável para Excel pt-BR ou R/Python)

@@ -14,6 +14,7 @@ import { tableToSav } from './lib/sav.js'
 import { buildReport } from './lib/report.js'
 import { makeZip } from './lib/zip.js'
 import { fuseDKT } from './lib/dkt-fusion.js'
+import { loadNorms, compareToNorms } from './lib/normative.js'
 
 const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
@@ -46,6 +47,7 @@ const state = {
   worker: null,
   running: false,
   segKind: null,
+  norms: null,
   cohort: []
 }
 
@@ -351,6 +353,7 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     progress(0.95)
     state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
     renderResults()
+    await updateNorms()
     $('step-export').hidden = false
     $('step-run').dataset.done = '1'
     log(`Volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³.`, 'ok')
@@ -569,6 +572,49 @@ function renderLadder () {
   el.innerHTML = svg
 }
 
+// ---------- comparação normativa (idade/sexo) ----------
+async function updateNorms () {
+  const age = parseFloat($('age').value)
+  const sex = $('sex').value
+  if (!state.stats || !(age > 0) || !(sex === 'F' || sex === 'M')) {
+    state.norms = null
+    $('norm-panel').hidden = true
+    return
+  }
+  try {
+    await loadNorms()
+    state.norms = compareToNorms(state.stats, { age, sex })
+    renderNorms()
+    if (state.norms.flags.length) {
+      const worst = state.norms.flags[0]
+      log(`QC normativo: ${state.norms.flags.length} região(ões) com |z| ≥ 3 — pior: ${worst.pt} (z ${worst.z.toFixed(1)})${Math.abs(worst.z) >= 4 ? ' — possível ERRO DE SEGMENTAÇÃO' : ''}`, Math.abs(worst.z) >= 4 ? 'err' : '')
+    }
+  } catch (e) {
+    log('Normativo indisponível: ' + e.message, 'err')
+  }
+}
+
+function renderNorms () {
+  const n = state.norms
+  if (!n || !n.available) { $('norm-panel').hidden = true; return }
+  $('norm-panel').hidden = false
+  const thead = $('norm-table').querySelector('thead')
+  const tbody = $('norm-table').querySelector('tbody')
+  thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th></th></tr>'
+  tbody.innerHTML = ''
+  const rows = [...n.globals, ...n.lobes]
+  for (const g of rows) {
+    const tr = document.createElement('tr')
+    const flagTxt = g.flag === 'erro?' ? '⚠ erro?' : g.flag === 'atipico' ? '· atípico' : ''
+    tr.innerHTML = `<td>${g.pt}</td>` +
+      `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
+      `<td class="num">${g.percentile != null ? g.percentile.toFixed(g.percentile < 1 || g.percentile > 99 ? 1 : 0) : '—'}</td>` +
+      `<td class="num">${g.z != null ? (g.z >= 0 ? '+' : '') + g.z.toFixed(2) : '—'}</td>` +
+      `<td style="color:${g.flag === 'erro?' ? 'var(--accent-strong)' : 'var(--warn)'};font-family:var(--mono);font-size:10.5px">${flagTxt}</td>`
+    tbody.appendChild(tr)
+  }
+}
+
 function escapeXml (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 
 // ---------- exportações ----------
@@ -577,6 +623,9 @@ function metaNow () {
     tool: 'SegmentaRM',
     version: VERSION,
     subject: $('subject').value || ($('stage-title').textContent || 'exame'),
+    age: parseFloat($('age').value) || null,
+    sex: $('sex').value || null,
+    norms: state.norms,
     date: new Date().toISOString().slice(0, 10),
     input: state.inputDesc,
     quality: state.quality,
@@ -797,6 +846,8 @@ function wireInputs () {
   $('filter').oninput = renderTable
   $('group-filter').onchange = renderTable
   $('subject').oninput = () => { $('stage-title').textContent = $('subject').value || 'Exame' }
+  $('age').onchange = updateNorms
+  $('sex').onchange = updateNorms
   document.querySelectorAll('[data-export]').forEach(btn => {
     btn.onclick = () => handleExport(btn.dataset.export)
   })

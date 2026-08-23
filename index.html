@@ -35,6 +35,21 @@
         <label for="subject">Identificação</label>
         <input type="text" id="subject" placeholder="ex.: PD-014_baseline" autocomplete="off">
       </div>
+      <div class="row field">
+        <div>
+          <label for="age">Idade (anos)</label>
+          <input type="number" id="age" min="1" max="100" step="1" placeholder="ex.: 62">
+        </div>
+        <div>
+          <label for="sex">Sexo</label>
+          <select id="sex">
+            <option value="">—</option>
+            <option value="F">Feminino</option>
+            <option value="M">Masculino</option>
+          </select>
+        </div>
+      </div>
+      <p class="note">Idade e sexo habilitam a comparação normativa (percentil e z) no relatório.</p>
       <div class="field" id="series-field" hidden>
         <label for="series">Série convertida (dcm2niix)</label>
         <select id="series"></select>
@@ -159,6 +174,13 @@
           <select id="group-filter" style="max-width:170px"><option value="">todos os grupos</option></select>
         </div>
         <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="norm-panel" hidden>
+        <h3>Normativo — idade e sexo</h3>
+        <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
+        <p class="note">Brain charts (Bethlehem et al., Nature 2022). Aproximação para QC — não clínico;
+        |z| ≥ 4 sugere erro de segmentação.</p>
       </section>
 
       <section class="panel">
