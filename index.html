@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SegmentaRM — segmentação e volumetria de RM no navegador</title>
 <meta name="description" content="Converte DICOM, segmenta o encéfalo (aparc+aseg, cerebelo, tronco) e exporta estatísticas em CSV, JSON, SPSS e PDF — tudo no seu dispositivo.">
-<meta name="theme-color" content="#B5433A">
+<meta name="theme-color" content="#0B0C0F">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="./styles.css">
@@ -64,8 +64,9 @@
       <section class="step" id="step-run" hidden>
         <h2><b>03</b> Segmentação</h2>
         <div class="field">
-          <label for="model">Modelo (brainchop, MIT)</label>
+          <label for="model">Modelo de segmentação</label>
           <select id="model">
+            <option value="synthseg">SynthSeg 1.0 — rede original (32 estruturas; baixa 27 MB)</option>
             <option value="aparc104" selected>Aparc+Aseg 104 — córtex E/D, subcortical, cerebelo, tronco, corpo caloso</option>
             <option value="aparc50">Aparc+Aseg 50 — parcelação sem separar hemisférios</option>
             <option value="aseg18">Subcortical 18 — aseg compacta com cerebelo e tronco</option>
@@ -91,7 +92,7 @@
           </div>
         </div>
         <button class="btn primary" id="run" disabled>Segmentar</button>
-        <p class="note">A primeira execução baixa o modelo (&lt;1 MB); depois tudo funciona offline.</p>
+        <p class="note">A primeira execução baixa o modelo (&lt;1 MB; SynthSeg: 27 MB); depois tudo funciona offline.</p>
       </section>
 
       <section class="step" id="step-export" hidden>
@@ -177,8 +178,8 @@
 
       <div class="eyebrow">Assimetria — esquerda contra direita</div>
       <div class="legend">
-        <span><i style="background:#B5433A"></i>esquerda</span>
-        <span><i style="background:#5B6B7A"></i>direita</span>
+        <span><i style="background:#E0655A"></i>esquerda</span>
+        <span><i style="background:#5E7286"></i>direita</span>
         <span>IA = 200·(E−D)/(E+D)</span>
       </div>
       <div class="ladder" id="ladder"></div>

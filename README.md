@@ -36,6 +36,25 @@ Arquivo .nii/.nii.gz ───────────────────�
             CSV · JSON · SPSS .sav · PDF · NIfTI (.nii.gz) · pacote .zip · coorte
 ```
 
+### SynthSeg de verdade, no navegador
+
+A opção **SynthSeg 1.0** roda a **rede original** de Billot, Iglesias e colaboradores
+([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): os pesos oficiais
+`synthseg_1.0.h5` foram convertidos para TensorFlow.js com
+`tools/convert_synthseg1_tfjs.py` (arquitetura reconstruída camada a camada a partir de
+`ext/neuron/models.py`; paridade numérica verificada — argmax concorda em 99,99% com o
+Keras, Δ máximo de posterior 0,004 com quantização float16, 27 MB).
+
+O pré-processamento segue o `predict.py` deles: alinhamento a RAS, rescale robusto por
+percentis 0,5–99,5 e grade de 1 mm (a conformação 256³ do app). **Diferenças declaradas**
+desta versão web: a inferência roda em **blocos com sobreposição** (o volume inteiro não
+cabe na memória de GPU do navegador; stitching por recorte central), e ainda não há
+test-time flipping nem suavização de posteriors. É isso que dá o caráter
+contraste/resolução-agnóstico do método — a rede é a mesma do `mri_synthseg`.
+
+Duas camadas ausentes no tfjs foram implementadas em `lib/tfjs-upsampling3d.js`
+(UpSampling3D por repetição e BatchNorm congelado para rank 5).
+
 ### Modelos embarcados (brainchop, licença MIT)
 
 | Opção na interface | Pasta | Classes |
@@ -120,9 +139,21 @@ sw.js · manifest.webmanifest         PWA offline
   podem exigir conversão prévia no desktop.
 - Os modelos foram treinados em **T1**; T2/FLAIR degradam o resultado (a régua avisa).
 
+## Interface
+
+Tema escuro de sala de laudo, com contraste alto e princípios das Human Interface
+Guidelines da Apple: resposta no `pointer-down`, transições curtas criticamente
+amortecidas, materiais translúcidos (`backdrop-filter`) com hierarquia de peso,
+tracking tipográfico específico por tamanho, e equivalentes gentis para
+`prefers-reduced-motion`, `prefers-reduced-transparency` e `prefers-contrast: more`.
+
 ## Créditos
 
-- **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT): worker de inferência e modelos.
+- **SynthSeg** — Billot, Greve, Puonti, Thielscher, Van Leemput, Fischl, Dalca, Iglesias
+  ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): pesos originais
+  `synthseg_1.0.h5` convertidos para tfjs. Cite *SynthSeg: Segmentation of brain MRI scans
+  of any contrast and resolution without retraining* (Medical Image Analysis, 2023).
+- **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT): worker de inferência e modelos MeshNet.
 - **NiiVue** e **dcm2niix** — Rorden e colaboradores.
 - Linhagem conceitual: **SynthSeg / SynthSR / recon-all-clinical** — Billot, Gopinath, Iglesias
   e colaboradores, Martinos Center (MGH/Harvard). Cite os artigos originais em trabalhos que

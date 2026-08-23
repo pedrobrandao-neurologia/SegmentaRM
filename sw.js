@@ -1,7 +1,7 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v1'
+const CACHE = 'segmentarm-v2'
 const SHELL = [
   './',
   './index.html',
@@ -11,7 +11,8 @@ const SHELL = [
   './icons/icon.svg',
   './lib/labels.js', './lib/quality.js', './lib/stats.js', './lib/nifti-writer.js',
   './lib/sav.js', './lib/pdf.js', './lib/zip.js', './lib/report.js',
-  './workers/preprocess.worker.js',
+  './workers/preprocess.worker.js', './workers/synthseg.worker.js',
+  './lib/synthseg-core.js', './lib/tfjs-upsampling3d.js',
   './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',
   './brainchop/tensor-utils.js', './brainchop/bwlabels.js',
   './vendor/niivue.js', './vendor/tf.fesm.min.js',
