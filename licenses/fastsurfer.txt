@@ -1,0 +1,21 @@
+FastSurferCNN — modelos em models/fastsurfer/ (axial.bin, coronal.bin, sagittal.bin)
+
+Rede e pesos: FastSurfer, Image Analysis Lab, German Center for
+Neurodegenerative Diseases (DZNE), Bonn — https://github.com/Deep-MI/FastSurfer
+Licença: Apache License 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+Os arquivos .bin são os checkpoints oficiais do FastSurferCNN v1
+(Epoch_30_training_state.pkl, vistas axial/coronal/sagital) convertidos para
+float16 com as BatchNorm dobradas nas convoluções (transformação exata em modo
+de avaliação) por tools/convert_fastsurfer_tfjs.py. Obtidos do espelho público
+FNNDSC/pl-fastsurfer_inference (plugin ChRIS, que os redistribuía sob a mesma
+licença), commit e239f044.
+
+Citação:
+  Henschel L, Conjeti S, Estrada S, Diers K, Fischl B, Reuter M.
+  FastSurfer — A fast and accurate deep learning based neuroimaging pipeline.
+  NeuroImage 219 (2020) 117012. https://doi.org/10.1016/j.neuroimage.2020.117012
+
+Este aplicativo usa apenas a etapa VOLUMÉTRICA do FastSurfer (a parcelação
+aparc.DKTatlas+aseg da CNN). O recon-surf (reconstrução de superfícies) depende
+de binários do FreeSurfer e não é executável no navegador.

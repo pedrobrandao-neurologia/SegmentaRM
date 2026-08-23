@@ -356,11 +356,14 @@ async function runBrainExtraction (conformed, isGPU, variant) {
   } else {
     log('Extração cerebral (≈ BET): inferindo probabilidade de cérebro…')
     // isScalar devolve a softmax de "cérebro" (0–255) em vez do argmax;
-    // type Segmentation evita a binarização do caminho Brain_Masking do worker
-    prob = await runBrainchopModel(MODEL_MAP.mask[variant], conformed, isGPU, 0.55, 0.72,
+    // type Segmentation evita a binarização do caminho Brain_Masking do worker.
+    // Sempre o modelo FAST (id 12): o caminho de subvolumes dos modelos de
+    // memória baixa ignora isScalar e devolveria só o argmax binário.
+    prob = await runBrainchopModel(MODEL_MAP.mask.high, conformed, isGPU, 0.55, 0.72,
       { entryPatch: { isScalar: true, type: 'Segmentation' } }).seg
   }
   const m = await runMaskWorker({ prob, intensity: conformed.img, dims: dimsOf(conformed), f, normalize: $('opt-norm').checked })
+  if (!m.voxels) throw new Error(`extração cerebral produziu máscara vazia (f=${f}) — reduza o limiar f ou desmarque a extração cerebral`)
   state.bet = { mask: new Uint8Array(m.mask), brain: new Uint8Array(m.brain), f, voxels: m.voxels, normalized: !!m.normalized, cleanupLog: m.log }
   const cm3 = m.voxels / 1000
   if (cm3 < 700) log(`Máscara pequena (${cm3.toFixed(0)} cm³) — limiar f=${f} pode estar alto; confira a sobreposição.`, 'err')
@@ -446,6 +449,16 @@ const DKT_SOURCES = {
   }
 }
 
+// máscara de córtex da segmentação-fonte (rótulos de córtex do DKT_SOURCES)
+function cortexMaskOf (seg, fuse) {
+  const mask = new Uint8Array(seg.length)
+  for (let v = 0; v < seg.length; v++) {
+    const s = seg[v]
+    if (s === fuse.leftCtx || s === fuse.rightCtx || s === fuse.bothCtx) mask[v] = 1
+  }
+  return mask
+}
+
 async function runDktStep () {
   if (state.running) return
   const src = DKT_SOURCES[state.segKind]
@@ -459,16 +472,35 @@ async function runDktStep () {
   try {
     const isGPU = $('backend').value !== 'cpu'
     const variant = $('mem').value === 'low' ? 'low' : 'high'
+    const parcSrc = $('parc-source').value
     log(`Parcelação DKT (passo adicional): a segmentação ${src.pt} atual fica preservada até a fusão dar certo.`)
-    const segDkt = await runBrainchopModel(variant === 'low' ? 15 : 14, state.conformed, isGPU, 0.1, 0.85).seg
-    log('Fundindo a parcelação DKT na fita cortical (esquema do predict_synthseg: seg==córtex recebe a parcela)…')
+    let segDkt, parcName
+    if (parcSrc === 'brainchop') {
+      parcName = 'rede DKT brainchop'
+      segDkt = await runBrainchopModel(variant === 'low' ? 15 : 14, state.conformed, isGPU, 0.1, 0.85).seg
+    } else {
+      const views = parcSrc === 'fastsurfer2' ? ['coronal', 'axial'] : ['coronal', 'axial', 'sagittal']
+      parcName = `FastSurfer (${views.length} vistas)`
+      log(`FastSurferCNN (Deep-MI, Apache 2.0): agregação de ${views.length} vistas restrita à fita cortical…`)
+      segDkt = await runWorker('./workers/fastsurfer.worker.js', {
+        baseUrl: location.href,
+        img: state.conformed.img,
+        dims: dimsOf(state.conformed),
+        affine: affineOf(state.conformed).flat(),
+        mask: cortexMaskOf(state.seg, src.fuse),
+        isGPU,
+        views,
+        batch: variant === 'low' ? 1 : 2
+      }, 0.05, 0.85)
+    }
+    log(`Fundindo a parcelação (${parcName}) na fita cortical (esquema do predict_synthseg: seg==córtex recebe a parcela)…`)
     const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed), src.fuse)
     const s = fused.stats
     // só troca o estado depois da fusão completa
     const prevKind = state.segKind
     state.seg = fused.seg
     state.segKind = prevKind + '-dkt'
-    state.modelUsed = `${src.pt} + parcelação DKT (passo adicional)`
+    state.modelUsed = `${src.pt} + parcelação DKT ${parcName === 'rede DKT brainchop' ? '(rede brainchop)' : `(${parcName})`}`
     log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
     await applySegmentationResult(src.labels, src.colormap)
   } catch (e) {

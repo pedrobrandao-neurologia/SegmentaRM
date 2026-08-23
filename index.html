@@ -117,10 +117,21 @@
 
     <section class="step" id="step-dkt">
       <h2><b>04</b> Parcelação DKT</h2>
+      <div class="field">
+        <label for="parc-source">Fonte da parcelação</label>
+        <select id="parc-source">
+          <option value="fastsurfer" selected>FastSurfer — 3 vistas (recomendada)</option>
+          <option value="fastsurfer2">FastSurfer — axial+coronal (mais rápida)</option>
+          <option value="brainchop">Rede DKT brainchop (anterior)</option>
+        </select>
+      </div>
       <button class="btn" id="run-dkt" disabled>Aplicar DKT ao resultado</button>
       <p class="note">Passo adicional sobre um resultado <b>SynthSeg</b> ou <b>aseg compacta</b>
-      pronto: parcela a fita cortical em Desikan-Killiany E/D (esquema do <code>--parc</code>
-      do SynthSeg 2.0). Se falhar, a segmentação já feita permanece intacta.</p>
+      pronto: parcela a fita cortical em Desikan-Killiany E/D. A fonte recomendada é a
+      <b>FastSurferCNN</b> (Deep-MI/FastSurfer, Apache 2.0) — a mesma rede volumétrica cujo
+      resultado o <code>recon-surf</code> refina em superfícies; roda só na fita cortical,
+      agregando as vistas axial, coronal e sagital. Se falhar, a segmentação já feita
+      permanece intacta. Em GPU leva alguns minutos; em CPU é lento.</p>
     </section>
 
     <section class="step about">
