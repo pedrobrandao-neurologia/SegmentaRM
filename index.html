@@ -4,203 +4,205 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SegmentaRM — segmentação e volumetria de RM no navegador</title>
-<meta name="description" content="Converte DICOM, segmenta o encéfalo (aparc+aseg, cerebelo, tronco) e exporta estatísticas em CSV, JSON, SPSS e PDF — tudo no seu dispositivo.">
+<meta name="description" content="Converte DICOM, segmenta o encéfalo (SynthSeg, aparc+aseg, DKT) e exporta estatísticas em CSV, JSON, SPSS e PDF — tudo no seu dispositivo.">
 <meta name="theme-color" content="#0B0C0F">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-<div class="shell">
-  <aside class="rail">
-    <div class="brand">
-      <h1>Segmenta<span class="rm">RM</span></h1>
-      <p>Converte a pasta DICOM, segmenta o encéfalo e calcula volumes — inteiramente no seu navegador. Nenhuma imagem sai do dispositivo.</p>
-      <span class="badge" id="device-badge" data-gpu="0">verificando o dispositivo</span>
+<div class="app">
+
+  <!-- barra superior: marca, ações de abertura, estado do dispositivo -->
+  <header class="bar">
+    <div class="brand">Segmenta<span class="rm">RM</span> <small>segmentação e volumetria no navegador</small></div>
+    <div class="btn-row">
+      <button class="btn sm" id="pick-folder" title="Selecionar uma pasta com arquivos DICOM">Pasta DICOM</button>
+      <button class="btn sm" id="pick-file" title="Abrir .nii ou .nii.gz">Arquivo NIfTI</button>
+      <button class="btn sm ghost" id="load-example" title="T1 real de exemplo para testar o fluxo">Exemplo</button>
     </div>
+    <div class="spacer"></div>
+    <span class="badge" id="device-badge" data-gpu="0">verificando o dispositivo</span>
+    <input type="file" id="file-nifti" accept=".nii,.nii.gz,.gz" hidden>
+    <input type="file" id="file-dicom" webkitdirectory directory multiple hidden>
+  </header>
 
-    <div class="steps">
-      <section class="step" id="step-input">
-        <h2><b>01</b> Imagem</h2>
-        <div class="field">
-          <div class="drop" id="drop" role="button" tabindex="0" aria-label="Carregar exame">
-            <strong>Solte a pasta DICOM ou um .nii / .nii.gz</strong>
-            <span>ou use os botões abaixo</span>
-          </div>
-          <input type="file" id="file-nifti" accept=".nii,.nii.gz,.gz" hidden>
-          <input type="file" id="file-dicom" webkitdirectory directory multiple hidden>
-        </div>
-        <div class="row">
-          <button class="btn small" id="pick-folder">Pasta DICOM</button>
-          <button class="btn small" id="pick-file">Arquivo NIfTI</button>
-          <button class="btn small" id="load-example">Exemplo</button>
-        </div>
-        <div class="field" id="series-field" hidden>
-          <label for="series">Série convertida (dcm2niix)</label>
-          <select id="series"></select>
-        </div>
-        <div class="field" style="margin-top:12px">
-          <label for="subject">Identificação do exame</label>
-          <input type="text" id="subject" placeholder="ex.: PD-014_baseline" autocomplete="off">
-        </div>
-      </section>
+  <!-- rail esquerdo: etapas do pipeline -->
+  <nav class="rail" aria-label="Etapas do pipeline">
+    <section class="step" id="step-input">
+      <h2><b>01</b> Exame</h2>
+      <div class="field">
+        <label for="subject">Identificação</label>
+        <input type="text" id="subject" placeholder="ex.: PD-014_baseline" autocomplete="off">
+      </div>
+      <div class="field" id="series-field" hidden>
+        <label for="series">Série convertida (dcm2niix)</label>
+        <select id="series"></select>
+      </div>
+    </section>
 
-      <section class="step" id="step-quality" hidden>
-        <h2><b>02</b> Qualidade da entrada</h2>
-        <div class="ruler" id="ruler"></div>
-        <ul class="findings" id="findings"></ul>
-        <div class="field" style="margin-top:12px">
-          <label for="pipeline">Pipeline</label>
-          <select id="pipeline">
-            <option value="auto">Automático (segue a régua)</option>
-            <option value="standard">Padrão — conformação direta</option>
-            <option value="robust">Robusto — reamostragem cúbica + correção de viés</option>
+    <section class="step" id="step-quality" hidden>
+      <h2><b>02</b> Qualidade</h2>
+      <div class="ruler" id="ruler"></div>
+      <ul class="findings" id="findings"></ul>
+      <div class="field" style="margin-top:10px">
+        <label for="pipeline">Pipeline</label>
+        <select id="pipeline">
+          <option value="auto">Automático (segue a régua)</option>
+          <option value="standard">Padrão — conformação direta</option>
+          <option value="robust">Robusto — reamostragem + viés</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés</label>
+      <label class="check"><input type="checkbox" id="opt-smooth"> Suavização leve</label>
+    </section>
+
+    <section class="step" id="step-run" hidden>
+      <h2><b>03</b> Segmentação</h2>
+      <div class="field">
+        <label for="model">Modelo</label>
+        <select id="model">
+          <option value="synthseg" selected>SynthSeg 1.0 — rede original (32 estruturas; 27 MB)</option>
+          <option value="aparc104">Aparc+Aseg 104 — DKT E/D, cerebelo, tronco, caloso</option>
+          <option value="aparc50">Aparc+Aseg 50 — sem separar hemisférios</option>
+          <option value="aseg18">Subcortical 18 — aseg compacta</option>
+          <option value="tissue">Tecidos — cinzenta / branca</option>
+          <option value="tissueLight">Tecidos — leve (GPU integrada / CPU)</option>
+          <option value="mask">Máscara encefálica</option>
+        </select>
+      </div>
+      <div class="row field">
+        <div>
+          <label for="backend">Execução</label>
+          <select id="backend">
+            <option value="gpu">GPU (WebGL)</option>
+            <option value="cpu">CPU</option>
           </select>
         </div>
-        <label class="check"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés (modo robusto)</label>
-        <label class="check"><input type="checkbox" id="opt-smooth"> Suavização leve (modo robusto)</label>
-      </section>
-
-      <section class="step" id="step-run" hidden>
-        <h2><b>03</b> Segmentação</h2>
-        <div class="field">
-          <label for="model">Modelo de segmentação</label>
-          <select id="model">
-            <option value="synthseg">SynthSeg 1.0 — rede original (32 estruturas; baixa 27 MB)</option>
-            <option value="synthsegdkt">SynthSeg 1.0 + parcelação DKT — córtex Desikan-Killiany E/D</option>
-            <option value="aparc104" selected>Aparc+Aseg 104 — córtex E/D, subcortical, cerebelo, tronco, corpo caloso</option>
-            <option value="aparc50">Aparc+Aseg 50 — parcelação sem separar hemisférios</option>
-            <option value="aseg18">Subcortical 18 — aseg compacta com cerebelo e tronco</option>
-            <option value="tissue">Tecidos — cinzenta / branca</option>
-            <option value="tissueLight">Tecidos — leve (GPUs integradas / CPU)</option>
-            <option value="mask">Máscara encefálica (skull stripping)</option>
+        <div>
+          <label for="mem">Memória</label>
+          <select id="mem">
+            <option value="high">Normal</option>
+            <option value="low">Baixa</option>
           </select>
-        </div>
-        <div class="row field">
-          <div>
-            <label for="backend">Execução</label>
-            <select id="backend">
-              <option value="gpu">GPU (WebGL)</option>
-              <option value="cpu">CPU</option>
-            </select>
-          </div>
-          <div>
-            <label for="mem">Memória</label>
-            <select id="mem">
-              <option value="high">Normal</option>
-              <option value="low">Baixa (mais lento)</option>
-            </select>
-          </div>
-        </div>
-        <button class="btn primary" id="run" disabled>Segmentar</button>
-        <p class="note">A primeira execução baixa o modelo (&lt;1 MB; SynthSeg: 27 MB); depois tudo funciona offline.</p>
-        <div class="field" style="margin-top:14px">
-          <label>Ou importe uma segmentação pronta</label>
-          <button class="btn small" id="import-anet">AssemblyNet / volBrain (.nii.gz)…</button>
-          <input type="file" id="file-anet" accept=".nii,.nii.gz,.gz" hidden>
-          <p class="note">Rode o Docker oficial <code>volbrain/assemblynet</code> no seu computador e importe o
-          <code>native_structures_*.nii.gz</code> com o <code>native_t1_*.nii.gz</code> correspondente carregado
-          no passo 01 (133 estruturas BrainColor). A licença do AssemblyNet — pesquisa, não comercial — não
-          permite embarcar a rede no navegador.</p>
-        </div>
-      </section>
-
-      <section class="step" id="step-export" hidden>
-        <h2><b>04</b> Exportar</h2>
-        <div class="row field">
-          <button class="btn small" data-export="csv">CSV</button>
-          <button class="btn small" data-export="json">JSON</button>
-          <button class="btn small" data-export="sav">SPSS .sav</button>
-          <button class="btn small" data-export="pdf">PDF</button>
-        </div>
-        <div class="row field">
-          <button class="btn small" data-export="nii-seg">Segmentação .nii.gz</button>
-          <button class="btn small" data-export="nii-conf">Conformado .nii.gz</button>
-        </div>
-        <div class="field">
-          <button class="btn" data-export="zip">Pacote completo (.zip)</button>
-        </div>
-        <div class="field">
-          <label for="decimal">Separador decimal do CSV</label>
-          <select id="decimal">
-            <option value=".">ponto (R, Python)</option>
-            <option value=",">vírgula + ponto-e-vírgula (Excel pt-BR)</option>
-          </select>
-        </div>
-        <div class="eyebrow" style="margin:16px 0 10px">Coorte</div>
-        <div class="row field">
-          <button class="btn small" data-export="queue">Adicionar exame</button>
-          <button class="btn small" data-export="cohort-csv" disabled>CSV largo</button>
-          <button class="btn small" data-export="cohort-sav" disabled>SAV</button>
-        </div>
-        <p class="queue" id="queue">Coorte vazia.</p>
-        <button class="btn small" data-export="cohort-clear" hidden>Limpar coorte</button>
-      </section>
-    </div>
-
-    <div class="console" id="console" aria-live="polite">
-      <div class="bar"><i id="progress"></i></div>
-      <p>Pronto para começar.</p>
-    </div>
-  </aside>
-
-  <main class="stage">
-    <div class="warnbox">
-      <b>Uso em pesquisa e ensino.</b> Esta ferramenta não é dispositivo médico, não tem registro ANVISA
-      e não substitui a leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
-    </div>
-
-    <h2 class="title" id="stage-title">Nenhum exame carregado</h2>
-    <p class="lede" id="stage-lede">
-      Carregue uma pasta DICOM (convertida localmente com dcm2niix) ou um NIfTI. A régua de qualidade decide
-      entre o pipeline padrão e o robusto; a segmentação roda com os modelos do brainchop e sai como tabela de
-      volumes, índice de assimetria e relatório em CSV, JSON, SPSS e PDF.
-    </p>
-
-    <div id="viewer-block" hidden>
-      <div class="eyebrow">Visualizador</div>
-      <div class="film">
-        <div class="canvasbox"><canvas id="gl"></canvas></div>
-        <div class="viewer-tools">
-          <label>Sobreposição <input type="range" id="opacity" min="0" max="100" value="55"></label>
-          <select id="slicetype">
-            <option value="multi" selected>Multiplanar</option>
-            <option value="axial">Axial</option>
-            <option value="coronal">Coronal</option>
-            <option value="sagittal">Sagital</option>
-            <option value="render">3D</option>
-          </select>
-          <span id="loc">—</span>
         </div>
       </div>
+      <button class="btn primary" id="run" disabled>Segmentar</button>
+      <p class="note">A primeira execução baixa o modelo; depois tudo funciona offline.</p>
+    </section>
+
+    <section class="step" id="step-dkt">
+      <h2><b>04</b> Parcelação DKT</h2>
+      <button class="btn" id="run-dkt" disabled>Aplicar DKT ao resultado</button>
+      <p class="note">Passo adicional sobre um resultado <b>SynthSeg</b> pronto: parcela a fita
+      cortical em Desikan-Killiany E/D (esquema do <code>--parc</code> do SynthSeg 2.0).
+      Se falhar, a segmentação já feita permanece intacta.</p>
+    </section>
+
+    <section class="step about">
+      <h2>Sobre</h2>
+      <p class="note">SynthSeg (Billot/Iglesias, Apache 2.0) convertido para tfjs; modelos MeshNet do
+      brainchop (MIT); NiiVue; dcm2niix WASM. Tudo roda localmente — nenhuma imagem sai do dispositivo.</p>
+      <p class="note warntext"><b>Uso em pesquisa e ensino.</b> Não é dispositivo médico, não tem registro
+      ANVISA e não substitui leitura radiológica.</p>
+    </section>
+  </nav>
+
+  <!-- palco central: o visualizador é a peça principal -->
+  <main class="view" id="viewer-block">
+    <div class="canvasbox"><canvas id="gl"></canvas></div>
+
+    <div class="hud">
+      <span class="tag" id="loc">—</span>
+      <span class="spacer"></span>
+      <label class="hud-ctl">rótulos <input type="range" id="opacity" min="0" max="100" value="55"></label>
+      <select id="slicetype" class="hud-sel">
+        <option value="multi" selected>Multiplanar</option>
+        <option value="axial">Axial</option>
+        <option value="coronal">Coronal</option>
+        <option value="sagittal">Sagital</option>
+        <option value="render">3D</option>
+      </select>
     </div>
+
+    <div class="dropwrap" id="empty">
+      <div class="drop" id="drop" role="button" tabindex="0" aria-label="Carregar exame">
+        <strong>Arraste uma pasta DICOM ou um .nii / .nii.gz</strong>
+        <span>O DICOM é convertido com dcm2niix aqui no navegador; o volume é conformado a 256³ · 1 mm
+        e segmentado localmente. Nada é enviado a servidores.</span>
+      </div>
+    </div>
+
+    <div class="progressbar"><i id="progress"></i></div>
+  </main>
+
+  <!-- inspetor direito: exame, resultados, exportação -->
+  <aside class="inspector" aria-label="Inspetor">
+    <section class="panel">
+      <h3>Exame</h3>
+      <h2 class="title" id="stage-title">Nenhum exame carregado</h2>
+      <p class="lede" id="stage-lede">Abra uma pasta DICOM ou um NIfTI na barra superior — ou clique em
+      “Exemplo”. A régua de qualidade decide o pipeline; a segmentação sai como volumes por estrutura,
+      assimetria e relatório.</p>
+    </section>
 
     <div id="results" hidden>
-      <div class="eyebrow">Agregados</div>
-      <div class="cards" id="cards"></div>
+      <section class="panel">
+        <h3>Agregados</h3>
+        <div class="cards" id="cards"></div>
+      </section>
 
-      <div class="eyebrow">Volumes por estrutura</div>
-      <div class="row" style="display:flex;gap:8px;margin-bottom:10px;max-width:560px">
-        <input type="text" id="filter" placeholder="filtrar estrutura…">
-        <select id="group-filter" style="max-width:240px"><option value="">todos os grupos</option></select>
-      </div>
-      <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      <section class="panel grow">
+        <h3>Regiões</h3>
+        <div class="row" style="margin-bottom:8px">
+          <input type="text" id="filter" placeholder="filtrar estrutura…">
+          <select id="group-filter" style="max-width:170px"><option value="">todos os grupos</option></select>
+        </div>
+        <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      </section>
 
-      <div class="eyebrow">Assimetria — esquerda contra direita</div>
-      <div class="legend">
-        <span><i style="background:#E0655A"></i>esquerda</span>
-        <span><i style="background:#5E7286"></i>direita</span>
-        <span>IA = 200·(E−D)/(E+D)</span>
-      </div>
-      <div class="ladder" id="ladder"></div>
+      <section class="panel">
+        <h3>Assimetria — E contra D</h3>
+        <div class="legend">
+          <span><i style="background:#E0655A"></i>esquerda</span>
+          <span><i style="background:#5E7286"></i>direita</span>
+          <span>IA = 200·(E−D)/(E+D)</span>
+        </div>
+        <div class="ladder" id="ladder"></div>
+      </section>
     </div>
 
-    <div class="empty" id="empty">
-      <strong>O palco está vazio</strong>
-      Arraste uma pasta DICOM ou um arquivo .nii / .nii.gz para a coluna à esquerda,
-      ou clique em “Exemplo” para ver o fluxo completo com um volume sintético.
-    </div>
-  </main>
+    <section class="panel" id="step-export" hidden>
+      <h3>Exportar</h3>
+      <div class="btn-row wrap">
+        <button class="btn sm" data-export="csv">CSV</button>
+        <button class="btn sm" data-export="json">JSON</button>
+        <button class="btn sm" data-export="sav">SPSS .sav</button>
+        <button class="btn sm" data-export="pdf">PDF</button>
+        <button class="btn sm" data-export="nii-seg">Segmentação .nii.gz</button>
+        <button class="btn sm" data-export="nii-conf">Conformado .nii.gz</button>
+        <button class="btn sm" data-export="zip">Pacote .zip</button>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label for="decimal">Separador decimal do CSV</label>
+        <select id="decimal">
+          <option value=".">ponto (R, Python)</option>
+          <option value=",">vírgula + ponto-e-vírgula (Excel pt-BR)</option>
+        </select>
+      </div>
+      <h3 style="margin-top:14px">Coorte</h3>
+      <div class="btn-row wrap">
+        <button class="btn sm" data-export="queue">Adicionar exame</button>
+        <button class="btn sm" data-export="cohort-csv" disabled>CSV largo</button>
+        <button class="btn sm" data-export="cohort-sav" disabled>SAV</button>
+        <button class="btn sm ghost" data-export="cohort-clear" hidden>Limpar</button>
+      </div>
+      <p class="queue" id="queue">Coorte vazia.</p>
+    </section>
+  </aside>
+
+  <!-- rodapé: log de uma linha (histórico no title) -->
+  <footer class="log"><span class="cursor">›</span><div class="console" id="console" aria-live="polite"><p>Pronto para começar.</p></div></footer>
 </div>
 <script type="module" src="./app.js"></script>
 </body>

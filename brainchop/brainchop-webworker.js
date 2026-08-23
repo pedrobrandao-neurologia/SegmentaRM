@@ -299,8 +299,8 @@ async function inferenceFullVolumeSeqCovLayerPhase2(
         statData.Expect_Labels = expected_Num_labels
         statData.NumLabels_Match = numSegClasses === expected_Num_labels
         if (numSegClasses !== expected_Num_labels) {
-          const msg = 'expected ' + expected_Num_labels + ' labels, but the predicted are ' + numSegClasses
-          callbackUI(msg, -1, msg)
+          // aviso, não erro: um sujeito pode não ter voxels de alguma classe rara
+          callbackUI('aviso: esperados ' + expected_Num_labels + ' rótulos, preditos ' + numSegClasses + ' — seguindo com o resultado', -1)
         }
 
         // -- Transpose back to original unpadded size
@@ -715,9 +715,8 @@ async function inferenceFullVolumePhase2(
 
         if (!isScalar) {
           if (numSegClasses !== expected_Num_labels) {
-            // errTxt = "expected " + expected_Num_labels + " labels, but the predicted are " + numSegClasses + ". For possible solutions please refer to <a href='https://github.com/neuroneural/brainchop/wiki/FAQ#Q3' target='_blank'><b> FAQ </b></a>.", "alert-error"
-            const errTxt = 'expected ' + expected_Num_labels + ' labels, but the predicted are ' + numSegClasses
-            callbackUI(errTxt, -1, errTxt)
+            // aviso, não erro: um sujeito pode não ter voxels de alguma classe rara
+            callbackUI('aviso: esperados ' + expected_Num_labels + ' rótulos, preditos ' + numSegClasses + ' — seguindo com o resultado', -1)
           }
         }
 

@@ -14,7 +14,6 @@ import { tableToSav } from './lib/sav.js'
 import { buildReport } from './lib/report.js'
 import { makeZip } from './lib/zip.js'
 import { fuseDKT } from './lib/dkt-fusion.js'
-import { assemblynetLabels, assemblynetPt, assemblynetColormap } from './lib/assemblynet-labels.js'
 
 const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
@@ -23,7 +22,6 @@ const $ = (id) => document.getElementById(id)
 // 'synthseg' é especial: usa a rede SynthSeg 1.0 original (worker próprio)
 const MODEL_MAP = {
   synthseg: { synth: true, pt: 'SynthSeg 1.0 — rede original de Billot/Iglesias (32 estruturas)' },
-  synthsegdkt: { synth: true, dkt: true, pt: 'SynthSeg 1.0 + parcelação cortical DKT (Desikan-Killiany)' },
   aparc104: { high: 14, low: 15, pt: 'Aparc+Aseg 104 classes (córtex E/D, cerebelo, tronco, corpo caloso)' },
   aparc50: { high: 8, low: 9, pt: 'Aparc+Aseg 50 classes' },
   aseg18: { high: 4, low: 5, pt: 'Subcortical 18 classes (aseg compacta)' },
@@ -47,6 +45,7 @@ const state = {
   modelUsed: '',
   worker: null,
   running: false,
+  segKind: null,
   cohort: []
 }
 
@@ -158,7 +157,9 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.rawVol = vol
   state.conformed = null
   state.seg = null
+  state.segKind = null
   state.stats = null
+  $('run-dkt').disabled = true
   state.sidecar = sidecar || null
   state.inputDesc = desc
   $('viewer-block').hidden = false
@@ -179,60 +180,6 @@ async function loadVolumeFile (file, sidecar, desc) {
     `Régua de qualidade: nível ${state.quality.grade} (${state.quality.gradeTxt}).`
   log(`Exame carregado: ${dims.join('×')} @ ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm — nível ${state.quality.grade}.`, 'ok')
   progress(0)
-}
-
-// ---------- importação de segmentação externa (AssemblyNet / volBrain) ----------
-async function importAssemblyNet (file) {
-  if (!state.rawVol) {
-    log('Carregue primeiro o T1 nativo correspondente (native_t1_*.nii.gz) no passo 01.', 'err')
-    return
-  }
-  try {
-    log(`Importando segmentação AssemblyNet: ${file.name}…`)
-    progress(0.2)
-    const segVol = await NVImage.loadFromFile({ file, name: file.name })
-    const dims = dimsOf(state.rawVol)
-    const sdims = dimsOf(segVol)
-    if (dims.join() !== sdims.join()) {
-      throw new Error(`a grade da segmentação (${sdims.join('×')}) não bate com a do T1 carregado (${dims.join('×')}) — use o par native_t1/native_structures (ou mni_t1/mni_structures) do mesmo exame`)
-    }
-    const n = dims[0] * dims[1] * dims[2]
-    const seg = new Uint8Array(n)
-    const src = segVol.img
-    for (let i = 0; i < n; i++) {
-      const v = Math.round(src[i])
-      seg[i] = v > 0 && v < 256 ? v : 0
-    }
-    // grade de análise = grade nativa do T1 (sem conformação)
-    state.conformed = state.rawVol
-    state.seg = seg
-    state.labelsMap = assemblynetLabels()
-    state.colormap = assemblynetColormap()
-    state.ptMap = assemblynetPt()
-    state.pipelineUsed = 'importado — segmentação do Docker oficial volbrain/assemblynet (grade nativa)'
-    state.modelUsed = 'AssemblyNet 1.0 — 133 estruturas (protocolo BrainColor/Neuromorphometrics)'
-
-    // sobreposição no visualizador
-    const nv = state.nv
-    while (nv.volumes.length > 1) await nv.removeVolume(nv.volumes[1])
-    const buf = writeNifti({ dims, pixDims: pixDimsOf(state.rawVol), affine: affineOf(state.rawVol), datatype: 'uint8', description: 'assemblynet import' }, seg)
-    const overlay = await NVImage.loadFromFile({ file: new File([buf], 'assemblynet.nii'), name: 'assemblynet.nii' })
-    overlay.setColormapLabel(state.colormap)
-    overlay.hdr.intent_code = 1002
-    overlay.opacity = (+$('opacity').value) / 100
-    await nv.addVolume(overlay)
-
-    log('Calculando estatísticas por estrutura (grade nativa, voxel de ' + voxVolOf(state.rawVol).toFixed(2) + ' mm³)…')
-    state.stats = computeStats(seg, state.rawVol.img, dims, state.labelsMap, affineOf(state.rawVol), voxVolOf(state.rawVol), state.ptMap)
-    renderResults()
-    $('step-export').hidden = false
-    $('step-run').dataset.done = '1'
-    log(`AssemblyNet importado: volume encefálico ${(state.stats.brainVol / 1000).toFixed(0)} cm³ em ${Object.keys(state.labelsMap).length - 1} estruturas.`, 'ok')
-    progress(0)
-  } catch (e) {
-    log('Erro na importação: ' + e.message, 'err')
-    progress(0)
-  }
 }
 
 function renderQuality (q) {
@@ -316,6 +263,138 @@ async function robustPreprocess (vol) {
   return await NVImage.loadFromFile({ file, name: 'preprocessado.nii' })
 }
 
+// ---------- execução de redes (workers) ----------
+function runWorker (url, message, pFrom, pTo) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(url, { type: 'module' })
+    state.worker = w
+    const t0 = performance.now()
+    w.onmessage = (ev) => {
+      const d = ev.data
+      if (d.cmd === 'ui') {
+        if (d.message) log('· ' + d.message)
+        if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
+        if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+      } else if (d.cmd === 'img') {
+        w.terminate(); state.worker = null
+        log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
+        resolve(new Uint8Array(d.img))
+      }
+    }
+    w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
+    w.postMessage(message)
+  })
+}
+
+function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo) {
+  log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
+  return runWorker('./workers/synthseg.worker.js', {
+    modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
+    img: conformed.img,
+    dims: dimsOf(conformed),
+    affine: affineOf(conformed),
+    isGPU,
+    tile,
+    overlap: 32
+  }, pFrom, pTo)
+}
+
+function runBrainchopModel (modelId, conformed, isGPU, pFrom, pTo) {
+  const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
+  modelEntry.isNvidia = false
+  try {
+    const dbg = state.nv.gl.getExtension('WEBGL_debug_renderer_info')
+    if (dbg) modelEntry.isNvidia = String(state.nv.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).includes('NVIDIA')
+  } catch { /* segue como não-NVIDIA */ }
+  const opts = Object.assign({}, brainChopOpts)
+  opts.rootURL = new URL('.', location.href).href.replace(/\/$/, '')
+  opts.isGPU = isGPU
+  opts.telemetryFlag = false
+  log(`Rede ${modelEntry.modelName.replace(/[^\x20-\x7E]+\s*/g, '')} — ${isGPU ? 'WebGL' : 'CPU'}…`)
+  return {
+    seg: runWorker('./brainchop/brainchop-webworker.js', {
+      opts,
+      modelEntry,
+      niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
+      niftiImage: conformed.img
+    }, pFrom, pTo),
+    modelEntry
+  }
+}
+
+// reconstrói a sobreposição de rótulos a partir de state.seg/state.colormap
+async function refreshOverlay () {
+  const nv = state.nv
+  while (nv.volumes.length > 1) await nv.removeVolume(nv.volumes[1])
+  const overlay = await state.conformed.clone()
+  overlay.zeroImage()
+  overlay.hdr.scl_slope = 1
+  overlay.hdr.scl_inter = 0
+  overlay.img = new Uint8Array(state.seg)
+  if (state.colormap) {
+    overlay.setColormapLabel(state.colormap)
+    overlay.hdr.intent_code = 1002
+  } else {
+    overlay.colormap = 'actc'
+  }
+  overlay.opacity = (+$('opacity').value) / 100
+  await nv.addVolume(overlay)
+}
+
+// recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
+async function applySegmentationResult (labelsPath, colormapPath) {
+  state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
+  state.colormap = colormapPath ? await (await fetch(colormapPath)).json() : null
+  await refreshOverlay()
+  if (state.labelsMap) {
+    log('Calculando estatísticas por estrutura…')
+    progress(0.95)
+    state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
+    renderResults()
+    $('step-export').hidden = false
+    $('step-run').dataset.done = '1'
+    log(`Volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³.`, 'ok')
+  } else {
+    log('Modelo sem tabela de rótulos (máscara) — estatísticas limitadas.', 'ok')
+    $('step-export').hidden = false
+  }
+  progress(0)
+}
+
+// ---------- passo adicional: parcelação DKT sobre um resultado SynthSeg pronto ----------
+async function runDktStep () {
+  if (state.running) return
+  if (!state.seg || state.segKind !== 'synthseg') {
+    log('O passo DKT parcela um resultado SynthSeg pronto — rode o SynthSeg primeiro.', 'err')
+    return
+  }
+  state.running = true
+  $('run').disabled = true
+  $('run-dkt').disabled = true
+  try {
+    const isGPU = $('backend').value !== 'cpu'
+    const variant = $('mem').value === 'low' ? 'low' : 'high'
+    log('Parcelação DKT (passo adicional): a segmentação SynthSeg atual fica preservada até a fusão dar certo.')
+    const segDkt = await runBrainchopModel(variant === 'low' ? 15 : 14, state.conformed, isGPU, 0.1, 0.85).seg
+    log('Fundindo a parcelação DKT na fita cortical do SynthSeg (esquema do predict_synthseg: seg==córtex recebe a parcela)…')
+    const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed))
+    const s = fused.stats
+    // só troca o estado depois da fusão completa
+    state.seg = fused.seg
+    state.segKind = 'synthseg-dkt'
+    state.modelUsed = 'SynthSeg 1.0 + parcelação DKT (passo adicional)'
+    log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
+    await applySegmentationResult('./models/synthseg1/labels_dkt.json', './models/synthseg1/colormap_dkt.json')
+  } catch (e) {
+    log('Erro no passo DKT — o resultado SynthSeg permanece intacto: ' + e.message, 'err')
+    progress(0)
+    $('run-dkt').disabled = false
+  } finally {
+    state.running = false
+    $('run').disabled = false
+  }
+}
+
 async function runSegmentation () {
   if (state.running || !state.rawVol) return
   state.running = true
@@ -348,133 +427,24 @@ async function runSegmentation () {
     const isGPU = $('backend').value !== 'cpu'
     let labelsPath, colormapPath, seg
 
-    // executa um worker (SynthSeg ou brainchop) e devolve o mapa de rótulos
-    const runWorker = (url, message, pFrom, pTo) => new Promise((resolve, reject) => {
-      const w = new Worker(url, { type: 'module' })
-      state.worker = w
-      const t0 = performance.now()
-      w.onmessage = (ev) => {
-        const d = ev.data
-        if (d.cmd === 'ui') {
-          if (d.message) log('· ' + d.message)
-          if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
-          if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
-        } else if (d.cmd === 'img') {
-          w.terminate(); state.worker = null
-          log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
-          resolve(new Uint8Array(d.img))
-        }
-      }
-      w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
-      w.postMessage(message)
-    })
-
-    const runSynthseg = (pFrom, pTo) => {
-      const tile = variant === 'low' ? 96 : 128
-      log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
-      return runWorker('./workers/synthseg.worker.js', {
-        modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
-        img: conformed.img,
-        dims: [256, 256, 256],
-        affine: affineOf(conformed),
-        isGPU,
-        tile,
-        overlap: 32
-      }, pFrom, pTo)
-    }
-
-    const runBrainchop = (modelId, pFrom, pTo) => {
-      const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
-      modelEntry.isNvidia = false
-      try {
-        const dbg = nv.gl.getExtension('WEBGL_debug_renderer_info')
-        if (dbg) modelEntry.isNvidia = String(nv.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).includes('NVIDIA')
-      } catch { /* segue como não-NVIDIA */ }
-      const opts = Object.assign({}, brainChopOpts)
-      opts.rootURL = new URL('.', location.href).href.replace(/\/$/, '')
-      opts.isGPU = isGPU
-      opts.telemetryFlag = false
-      log(`Rede ${modelEntry.modelName.replace(/[^\x20-\x7E]+\s*/g, '')} — ${isGPU ? 'WebGL' : 'CPU'}…`)
-      return {
-        seg: runWorker('./brainchop/brainchop-webworker.js', {
-          opts,
-          modelEntry,
-          niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
-          niftiImage: conformed.img
-        }, pFrom, pTo),
-        modelEntry
-      }
-    }
-
     if (MODEL_MAP[kind].synth) {
-      // -------- SynthSeg 1.0 (worker próprio; opcionalmente + parcelação DKT) --------
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      const withDkt = !!MODEL_MAP[kind].dkt
-      seg = await runSynthseg(0.45, withDkt ? 0.72 : 0.93)
-      if (withDkt) {
-        // parcelação DKT: rede aparc+aseg 104 no mesmo volume, mascarada na fita
-        // cortical do SynthSeg — mesmo esquema do predict_synthseg.py (seg==3|42)
-        log('Parcelação DKT: rodando a rede aparc+aseg 104 sobre o mesmo volume…')
-        const segDkt = await runBrainchop(variant === 'low' ? 15 : 14, 0.72, 0.9).seg
-        log('Fundindo a parcelação na fita cortical do SynthSeg…')
-        const fused = fuseDKT(seg, segDkt, [256, 256, 256])
-        seg = fused.seg
-        const s = fused.stats
-        log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
-        labelsPath = './models/synthseg1/labels_dkt.json'
-        colormapPath = './models/synthseg1/colormap_dkt.json'
-      } else {
-        labelsPath = './models/synthseg1/labels.json'
-        colormapPath = './models/synthseg1/colormap.json'
-      }
+      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, 0.45, 0.93)
+      labelsPath = './models/synthseg1/labels.json'
+      colormapPath = './models/synthseg1/colormap.json'
     } else {
-      // -------- família brainchop (MeshNet) --------
-      const modelId = MODEL_MAP[kind][variant]
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      const r = runBrainchop(modelId, 0.45, 0.93)
+      const r = runBrainchopModel(MODEL_MAP[kind][variant], conformed, isGPU, 0.45, 0.93)
       labelsPath = r.modelEntry.labelsPath
       colormapPath = r.modelEntry.colormapPath
       seg = await r.seg
     }
     state.seg = seg
-
-    // rótulos e colormap
-    state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
-    state.colormap = colormapPath ? await (await fetch(colormapPath)).json() : null
-
-    // sobreposição
-    const overlay = await conformed.clone()
-    overlay.zeroImage()
-    overlay.hdr.scl_slope = 1
-    overlay.hdr.scl_inter = 0
-    overlay.img = new Uint8Array(seg)
-    if (state.colormap) {
-      overlay.setColormapLabel(state.colormap)
-      overlay.hdr.intent_code = 1002
-    } else {
-      overlay.colormap = 'actc'
-    }
-    overlay.opacity = (+$('opacity').value) / 100
-    await nv.addVolume(overlay)
-
-    // estatísticas
-    if (state.labelsMap) {
-      log('Calculando estatísticas por estrutura…')
-      progress(0.95)
-      const affine = affineOf(conformed)
-      state.ptMap = null
-      state.stats = computeStats(seg, conformed.img, dimsOf(conformed), state.labelsMap, affine, voxVolOf(conformed))
-      renderResults()
-      $('step-export').hidden = false
-      $('step-run').dataset.done = '1'
-      log(`Volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³.`, 'ok')
-    } else {
-      log('Modelo sem tabela de rótulos (máscara) — estatísticas limitadas.', 'ok')
-      $('step-export').hidden = false
-    }
-    progress(0)
+    state.segKind = kind
+    $('run-dkt').disabled = kind !== 'synthseg'
+    await applySegmentationResult(labelsPath, colormapPath)
   } catch (e) {
     log('Erro: ' + e.message, 'err')
     if (/memory|memória|texture|alloc/i.test(String(e.message))) {
@@ -807,11 +777,7 @@ function wireInputs () {
   }
 
   $('run').onclick = runSegmentation
-  $('import-anet').onclick = () => $('file-anet').click()
-  $('file-anet').onchange = async (e) => {
-    if (e.target.files.length) await importAssemblyNet(e.target.files[0])
-    e.target.value = ''
-  }
+  $('run-dkt').onclick = runDktStep
   $('opacity').oninput = () => {
     const nv = state.nv
     if (nv.volumes.length > 1) {
