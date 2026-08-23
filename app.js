@@ -23,6 +23,7 @@ const MODEL_MAP = {
   aparc50: { high: 8, low: 9, pt: 'Aparc+Aseg 50 classes' },
   aseg18: { high: 4, low: 5, pt: 'Subcortical 18 classes (aseg compacta)' },
   tissue: { high: 2, low: 3, pt: 'Tecidos — cinzenta/branca' },
+  tissueLight: { high: 1, low: 1, pt: 'Tecidos — leve (5 filtros, GPUs integradas/CPU)' },
   mask: { high: 12, low: 13, pt: 'Máscara encefálica' }
 }
 
