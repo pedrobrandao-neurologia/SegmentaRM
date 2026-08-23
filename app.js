@@ -13,6 +13,8 @@ import { writeNifti, gzipBuffer } from './lib/nifti-writer.js'
 import { tableToSav } from './lib/sav.js'
 import { buildReport } from './lib/report.js'
 import { makeZip } from './lib/zip.js'
+import { fuseDKT } from './lib/dkt-fusion.js'
+import { assemblynetLabels, assemblynetPt, assemblynetColormap } from './lib/assemblynet-labels.js'
 
 const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
@@ -21,6 +23,7 @@ const $ = (id) => document.getElementById(id)
 // 'synthseg' é especial: usa a rede SynthSeg 1.0 original (worker próprio)
 const MODEL_MAP = {
   synthseg: { synth: true, pt: 'SynthSeg 1.0 — rede original de Billot/Iglesias (32 estruturas)' },
+  synthsegdkt: { synth: true, dkt: true, pt: 'SynthSeg 1.0 + parcelação cortical DKT (Desikan-Killiany)' },
   aparc104: { high: 14, low: 15, pt: 'Aparc+Aseg 104 classes (córtex E/D, cerebelo, tronco, corpo caloso)' },
   aparc50: { high: 8, low: 9, pt: 'Aparc+Aseg 50 classes' },
   aseg18: { high: 4, low: 5, pt: 'Subcortical 18 classes (aseg compacta)' },
@@ -178,6 +181,60 @@ async function loadVolumeFile (file, sidecar, desc) {
   progress(0)
 }
 
+// ---------- importação de segmentação externa (AssemblyNet / volBrain) ----------
+async function importAssemblyNet (file) {
+  if (!state.rawVol) {
+    log('Carregue primeiro o T1 nativo correspondente (native_t1_*.nii.gz) no passo 01.', 'err')
+    return
+  }
+  try {
+    log(`Importando segmentação AssemblyNet: ${file.name}…`)
+    progress(0.2)
+    const segVol = await NVImage.loadFromFile({ file, name: file.name })
+    const dims = dimsOf(state.rawVol)
+    const sdims = dimsOf(segVol)
+    if (dims.join() !== sdims.join()) {
+      throw new Error(`a grade da segmentação (${sdims.join('×')}) não bate com a do T1 carregado (${dims.join('×')}) — use o par native_t1/native_structures (ou mni_t1/mni_structures) do mesmo exame`)
+    }
+    const n = dims[0] * dims[1] * dims[2]
+    const seg = new Uint8Array(n)
+    const src = segVol.img
+    for (let i = 0; i < n; i++) {
+      const v = Math.round(src[i])
+      seg[i] = v > 0 && v < 256 ? v : 0
+    }
+    // grade de análise = grade nativa do T1 (sem conformação)
+    state.conformed = state.rawVol
+    state.seg = seg
+    state.labelsMap = assemblynetLabels()
+    state.colormap = assemblynetColormap()
+    state.ptMap = assemblynetPt()
+    state.pipelineUsed = 'importado — segmentação do Docker oficial volbrain/assemblynet (grade nativa)'
+    state.modelUsed = 'AssemblyNet 1.0 — 133 estruturas (protocolo BrainColor/Neuromorphometrics)'
+
+    // sobreposição no visualizador
+    const nv = state.nv
+    while (nv.volumes.length > 1) await nv.removeVolume(nv.volumes[1])
+    const buf = writeNifti({ dims, pixDims: pixDimsOf(state.rawVol), affine: affineOf(state.rawVol), datatype: 'uint8', description: 'assemblynet import' }, seg)
+    const overlay = await NVImage.loadFromFile({ file: new File([buf], 'assemblynet.nii'), name: 'assemblynet.nii' })
+    overlay.setColormapLabel(state.colormap)
+    overlay.hdr.intent_code = 1002
+    overlay.opacity = (+$('opacity').value) / 100
+    await nv.addVolume(overlay)
+
+    log('Calculando estatísticas por estrutura (grade nativa, voxel de ' + voxVolOf(state.rawVol).toFixed(2) + ' mm³)…')
+    state.stats = computeStats(seg, state.rawVol.img, dims, state.labelsMap, affineOf(state.rawVol), voxVolOf(state.rawVol), state.ptMap)
+    renderResults()
+    $('step-export').hidden = false
+    $('step-run').dataset.done = '1'
+    log(`AssemblyNet importado: volume encefálico ${(state.stats.brainVol / 1000).toFixed(0)} cm³ em ${Object.keys(state.labelsMap).length - 1} estruturas.`, 'ok')
+    progress(0)
+  } catch (e) {
+    log('Erro na importação: ' + e.message, 'err')
+    progress(0)
+  }
+}
+
 function renderQuality (q) {
   const grades = ['A', 'B', 'C', 'D']
   const gi = grades.indexOf(q.grade)
@@ -214,6 +271,12 @@ function effectivePipeline () {
 function affineOf (vol) {
   const a = vol.hdr.affine
   return Array.isArray(a[0]) ? a.map(r => Array.from(r)) : [0, 1, 2, 3].map(r => [0, 1, 2, 3].map(c => a[r * 4 + c]))
+}
+function dimsOf (vol) { return [vol.hdr.dims[1], vol.hdr.dims[2], vol.hdr.dims[3]] }
+function pixDimsOf (vol) { return [Math.abs(vol.hdr.pixDims[1]), Math.abs(vol.hdr.pixDims[2]), Math.abs(vol.hdr.pixDims[3])] }
+function voxVolOf (vol) { const p = pixDimsOf(vol); return p[0] * p[1] * p[2] }
+function datatypeOf (img) {
+  return img instanceof Uint8Array ? 'uint8' : img instanceof Int16Array ? 'int16' : 'float32'
 }
 
 async function robustPreprocess (vol) {
@@ -285,83 +348,95 @@ async function runSegmentation () {
     const isGPU = $('backend').value !== 'cpu'
     let labelsPath, colormapPath, seg
 
-    if (MODEL_MAP[kind].synth) {
-      // -------- SynthSeg 1.0: worker próprio (UNet com skips, blocos com sobreposição) --------
-      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
-      labelsPath = './models/synthseg1/labels.json'
-      colormapPath = './models/synthseg1/colormap.json'
-      const tile = variant === 'low' ? 96 : 128
-      log(`Segmentando com ${state.modelUsed} — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
-      seg = await new Promise((resolve, reject) => {
-        const w = new Worker('./workers/synthseg.worker.js', { type: 'module' })
-        state.worker = w
-        const t0 = performance.now()
-        w.onmessage = (ev) => {
-          const d = ev.data
-          if (d.cmd === 'ui') {
-            if (d.message) log('· ' + d.message)
-            if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(0.45 + d.progressFrac * 0.5)
-            if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
-          } else if (d.cmd === 'img') {
-            w.terminate(); state.worker = null
-            log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
-            resolve(new Uint8Array(d.img))
-          }
+    // executa um worker (SynthSeg ou brainchop) e devolve o mapa de rótulos
+    const runWorker = (url, message, pFrom, pTo) => new Promise((resolve, reject) => {
+      const w = new Worker(url, { type: 'module' })
+      state.worker = w
+      const t0 = performance.now()
+      w.onmessage = (ev) => {
+        const d = ev.data
+        if (d.cmd === 'ui') {
+          if (d.message) log('· ' + d.message)
+          if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
+          if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+        } else if (d.cmd === 'img') {
+          w.terminate(); state.worker = null
+          log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
+          resolve(new Uint8Array(d.img))
         }
-        w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker SynthSeg')) }
-        w.postMessage({
-          modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
-          img: conformed.img,
-          dims: [256, 256, 256],
-          affine: affineOf(conformed),
-          isGPU,
-          tile,
-          overlap: 32
-        })
-      })
-    } else {
-      // -------- família brainchop (MeshNet) --------
-      const modelId = MODEL_MAP[kind][variant]
+      }
+      w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
+      w.postMessage(message)
+    })
+
+    const runSynthseg = (pFrom, pTo) => {
+      const tile = variant === 'low' ? 96 : 128
+      log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
+      return runWorker('./workers/synthseg.worker.js', {
+        modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
+        img: conformed.img,
+        dims: [256, 256, 256],
+        affine: affineOf(conformed),
+        isGPU,
+        tile,
+        overlap: 32
+      }, pFrom, pTo)
+    }
+
+    const runBrainchop = (modelId, pFrom, pTo) => {
       const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
       modelEntry.isNvidia = false
       try {
         const dbg = nv.gl.getExtension('WEBGL_debug_renderer_info')
         if (dbg) modelEntry.isNvidia = String(nv.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).includes('NVIDIA')
       } catch { /* segue como não-NVIDIA */ }
-      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
-      labelsPath = modelEntry.labelsPath
-      colormapPath = modelEntry.colormapPath
-
       const opts = Object.assign({}, brainChopOpts)
       opts.rootURL = new URL('.', location.href).href.replace(/\/$/, '')
       opts.isGPU = isGPU
       opts.telemetryFlag = false
-
-      log(`Segmentando com ${state.modelUsed} — ${isGPU ? 'WebGL' : 'CPU'}…`)
-      seg = await new Promise((resolve, reject) => {
-        const w = new Worker('./brainchop/brainchop-webworker.js', { type: 'module' })
-        state.worker = w
-        const t0 = performance.now()
-        w.onmessage = (ev) => {
-          const d = ev.data
-          if (d.cmd === 'ui') {
-            if (d.message) log('· ' + d.message)
-            if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(0.45 + d.progressFrac * 0.45)
-            if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
-          } else if (d.cmd === 'img') {
-            w.terminate(); state.worker = null
-            log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
-            resolve(new Uint8Array(d.img))
-          }
-        }
-        w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
-        w.postMessage({
+      log(`Rede ${modelEntry.modelName.replace(/[^\x20-\x7E]+\s*/g, '')} — ${isGPU ? 'WebGL' : 'CPU'}…`)
+      return {
+        seg: runWorker('./brainchop/brainchop-webworker.js', {
           opts,
           modelEntry,
           niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
           niftiImage: conformed.img
-        })
-      })
+        }, pFrom, pTo),
+        modelEntry
+      }
+    }
+
+    if (MODEL_MAP[kind].synth) {
+      // -------- SynthSeg 1.0 (worker próprio; opcionalmente + parcelação DKT) --------
+      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
+      log(`Segmentando com ${state.modelUsed}…`)
+      const withDkt = !!MODEL_MAP[kind].dkt
+      seg = await runSynthseg(0.45, withDkt ? 0.72 : 0.93)
+      if (withDkt) {
+        // parcelação DKT: rede aparc+aseg 104 no mesmo volume, mascarada na fita
+        // cortical do SynthSeg — mesmo esquema do predict_synthseg.py (seg==3|42)
+        log('Parcelação DKT: rodando a rede aparc+aseg 104 sobre o mesmo volume…')
+        const segDkt = await runBrainchop(variant === 'low' ? 15 : 14, 0.72, 0.9).seg
+        log('Fundindo a parcelação na fita cortical do SynthSeg…')
+        const fused = fuseDKT(seg, segDkt, [256, 256, 256])
+        seg = fused.seg
+        const s = fused.stats
+        log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
+        labelsPath = './models/synthseg1/labels_dkt.json'
+        colormapPath = './models/synthseg1/colormap_dkt.json'
+      } else {
+        labelsPath = './models/synthseg1/labels.json'
+        colormapPath = './models/synthseg1/colormap.json'
+      }
+    } else {
+      // -------- família brainchop (MeshNet) --------
+      const modelId = MODEL_MAP[kind][variant]
+      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
+      log(`Segmentando com ${state.modelUsed}…`)
+      const r = runBrainchop(modelId, 0.45, 0.93)
+      labelsPath = r.modelEntry.labelsPath
+      colormapPath = r.modelEntry.colormapPath
+      seg = await r.seg
     }
     state.seg = seg
 
@@ -389,7 +464,8 @@ async function runSegmentation () {
       log('Calculando estatísticas por estrutura…')
       progress(0.95)
       const affine = affineOf(conformed)
-      state.stats = computeStats(seg, conformed.img, [256, 256, 256], state.labelsMap, affine, 1)
+      state.ptMap = null
+      state.stats = computeStats(seg, conformed.img, dimsOf(conformed), state.labelsMap, affine, voxVolOf(conformed))
       renderResults()
       $('step-export').hidden = false
       $('step-run').dataset.done = '1'
@@ -578,13 +654,13 @@ async function makeExports () {
     },
     pdf: async () => buildReport({ stats: state.stats, meta, snapshot: await snapshotJpeg() }),
     niiSeg: async () => {
-      const A = affineOf(state.conformed)
-      const buf = writeNifti({ dims: [256, 256, 256], pixDims: [1, 1, 1], affine: A, datatype: 'uint8', description: 'segmentarm ' + meta.model.slice(0, 40) }, state.seg)
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm ' + meta.model.slice(0, 40) }, state.seg)
       return await gzipBuffer(buf)
     },
     niiConf: async () => {
-      const A = affineOf(state.conformed)
-      const buf = writeNifti({ dims: [256, 256, 256], pixDims: [1, 1, 1], affine: A, datatype: 'uint8', description: 'segmentarm conformado' }, state.conformed.img)
+      const img0 = state.conformed.img
+      const img = (img0 instanceof Uint8Array || img0 instanceof Int16Array || img0 instanceof Float32Array) ? img0 : Float32Array.from(img0)
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: datatypeOf(img), description: 'segmentarm imagem de análise' }, img)
       return await gzipBuffer(buf)
     }
   }
@@ -731,6 +807,11 @@ function wireInputs () {
   }
 
   $('run').onclick = runSegmentation
+  $('import-anet').onclick = () => $('file-anet').click()
+  $('file-anet').onchange = async (e) => {
+    if (e.target.files.length) await importAssemblyNet(e.target.files[0])
+    e.target.value = ''
+  }
   $('opacity').oninput = () => {
     const nv = state.nv
     if (nv.volumes.length > 1) {
