@@ -55,6 +55,38 @@ contraste/resolução-agnóstico do método — a rede é a mesma do `mri_synths
 Duas camadas ausentes no tfjs foram implementadas em `lib/tfjs-upsampling3d.js`
 (UpSampling3D por repetição e BatchNorm congelado para rank 5).
 
+### Parcelação cortical DKT sobre o SynthSeg
+
+A opção **SynthSeg 1.0 + parcelação DKT** replica o esquema do `--parc` do SynthSeg 2.0
+(`predict_synthseg.py`: `mask = (seg==3)|(seg==42); seg[mask] = parcelação[mask]`), no
+espírito do `aparc` do FastSurfer: a fita cortical segmentada pelo SynthSeg é parcelada
+em **Desikan-Killiany por hemisfério** (34 regiões E/D). Como a rede de parcelação oficial
+do SynthSeg 2.0 (`synthseg_parc_2.0.h5`) é distribuída por um OneDrive da UCL inacessível
+para redistribuição automática, a fonte da parcelação aqui é a **rede DKT já embarcada**
+(aparc+aseg 104 do brainchop, MIT), rodada sobre o mesmo volume conformado; voxels de
+córtex sem parcela recebem a parcela modal da vizinhança por propagação (equivalente ao
+argmax sem fundo do pipeline oficial) — `lib/dkt-fusion.js`. O resultado: as 32 estruturas
+do SynthSeg + 68 parcelas corticais DKT, com lobos e assimetria por região.
+
+### Importar AssemblyNet (volBrain)
+
+O [AssemblyNet](https://github.com/volBrain-net/AssemblyNet) (Coupé et al., NeuroImage 2020)
+segmenta o T1 em **133 estruturas** do protocolo BrainColor/Neuromorphometrics com um
+ensemble de ~250 CNNs. O repositório oficial distribui apenas a imagem Docker, e a licença
+(pesquisa, não comercial) **proíbe reproduzir/redistribuir** a rede — por isso ela não pode
+ser embarcada aqui como o SynthSeg. O SegmentaRM oferece o caminho compatível com a licença:
+
+1. rode o Docker oficial no seu computador:
+   `docker run --rm -v /caminho:/data volbrain/assemblynet:1.0.0 /data/t1.nii.gz`
+2. carregue o `native_t1_*.nii.gz` no passo 01 e importe o `native_structures_*.nii.gz`
+   no passo 03 (**Importar → AssemblyNet/volBrain**).
+
+O aplicativo aplica a tabela BrainColor completa (nomes canônicos + português + cores
+estáveis por estrutura, `lib/assemblynet-labels.js`), calcula as estatísticas na **grade
+nativa** (volume real do voxel) e libera todas as exportações e a coorte. Validado com o
+exemplo oficial do repositório: córtex total 662,9 cm³ contra 668,1 cm³ do relatório deles
+(diferença de 0,8%, definições de agregado distintas).
+
 ### Modelos embarcados (brainchop, licença MIT)
 
 | Opção na interface | Pasta | Classes |

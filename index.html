@@ -67,6 +67,7 @@
           <label for="model">Modelo de segmentação</label>
           <select id="model">
             <option value="synthseg">SynthSeg 1.0 — rede original (32 estruturas; baixa 27 MB)</option>
+            <option value="synthsegdkt">SynthSeg 1.0 + parcelação DKT — córtex Desikan-Killiany E/D</option>
             <option value="aparc104" selected>Aparc+Aseg 104 — córtex E/D, subcortical, cerebelo, tronco, corpo caloso</option>
             <option value="aparc50">Aparc+Aseg 50 — parcelação sem separar hemisférios</option>
             <option value="aseg18">Subcortical 18 — aseg compacta com cerebelo e tronco</option>
@@ -93,6 +94,15 @@
         </div>
         <button class="btn primary" id="run" disabled>Segmentar</button>
         <p class="note">A primeira execução baixa o modelo (&lt;1 MB; SynthSeg: 27 MB); depois tudo funciona offline.</p>
+        <div class="field" style="margin-top:14px">
+          <label>Ou importe uma segmentação pronta</label>
+          <button class="btn small" id="import-anet">AssemblyNet / volBrain (.nii.gz)…</button>
+          <input type="file" id="file-anet" accept=".nii,.nii.gz,.gz" hidden>
+          <p class="note">Rode o Docker oficial <code>volbrain/assemblynet</code> no seu computador e importe o
+          <code>native_structures_*.nii.gz</code> com o <code>native_t1_*.nii.gz</code> correspondente carregado
+          no passo 01 (133 estruturas BrainColor). A licença do AssemblyNet — pesquisa, não comercial — não
+          permite embarcar a rede no navegador.</p>
+        </div>
       </section>
 
       <section class="step" id="step-export" hidden>
