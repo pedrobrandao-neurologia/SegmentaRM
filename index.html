@@ -68,8 +68,17 @@
           <option value="robust">Robusto — reamostragem + viés</option>
         </select>
       </div>
-      <label class="check"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés</label>
+      <label class="check" title="Permuta/flip de eixos pela affine, sem reamostrar, antes de tudo"><input type="checkbox" id="opt-reorient" checked> Reorientação RAS <span class="eq">≈ fslreorient2std</span></label>
+      <label class="check" title="Corta FOV inferior excessivo: mantém 170 mm do topo da cabeça"><input type="checkbox" id="opt-crop"> Recorte de pescoço <span class="eq">≈ robustfov</span></label>
+      <label class="check" title="Correção homomórfica, antes da extração cerebral — a imagem corrigida alimenta o resto"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés <span class="eq">≈ N4</span></label>
       <label class="check"><input type="checkbox" id="opt-smooth"> Suavização leve</label>
+      <label class="check" title="Máscara MeshNet + limpeza morfológica; a rede recebe só o cérebro"><input type="checkbox" id="opt-bet"> Extração cerebral <span class="eq">≈ BET</span></label>
+      <div class="field" style="margin-top:6px">
+        <label for="bet-f">Limiar f da máscara <output id="bet-f-out">0.50</output></label>
+        <input type="range" id="bet-f" min="0.1" max="0.9" step="0.05" value="0.5" title="Análogo ao -f do BET: maior = máscara menor">
+      </div>
+      <label class="check" title="Reescala [p2,p98]→[0,255] dentro da máscara (efeito ≈ FAST); muda o domínio visto pela rede"><input type="checkbox" id="opt-norm"> Normalização na máscara <span class="eq">≈ FAST</span></label>
+      <p class="note">A máscara é sobreposta no visualizador para inspeção antes da segmentação.</p>
     </section>
 
     <section class="step" id="step-run" hidden>
@@ -203,6 +212,9 @@
         <button class="btn sm" data-export="pdf">PDF</button>
         <button class="btn sm" data-export="nii-seg">Segmentação .nii.gz</button>
         <button class="btn sm" data-export="nii-conf">Conformado .nii.gz</button>
+        <button class="btn sm" data-export="nii-native" disabled>Pré-proc. nativo</button>
+        <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
+        <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
       </div>
       <div class="field" style="margin-top:10px">

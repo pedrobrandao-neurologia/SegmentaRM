@@ -48,6 +48,8 @@ const state = {
   running: false,
   segKind: null,
   norms: null,
+  native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
+  bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   cohort: []
 }
 
@@ -161,6 +163,8 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.seg = null
   state.segKind = null
   state.stats = null
+  state.native = null
+  state.bet = null
   $('run-dkt').disabled = true
   state.sidecar = sidecar || null
   state.inputDesc = desc
@@ -228,14 +232,17 @@ function datatypeOf (img) {
   return img instanceof Uint8Array ? 'uint8' : img instanceof Int16Array ? 'int16' : 'float32'
 }
 
-async function robustPreprocess (vol) {
+// pré-processamento no espaço nativo (reorientação RAS ≈ fslreorient2std, recorte de
+// pescoço ≈ robustfov, reamostragem do ramo robusto, viés, suavização) num Web Worker
+async function preprocessNative (vol, flags) {
   const dims = [vol.hdr.dims[1], vol.hdr.dims[2], vol.hdr.dims[3]]
   const pixDims = [vol.hdr.pixDims[1], vol.hdr.pixDims[2], vol.hdr.pixDims[3]]
   const src = new Float32Array(vol.img.length)
   const slope = vol.hdr.scl_slope || 1
   const inter = vol.hdr.scl_inter || 0
   for (let i = 0; i < src.length; i++) src[i] = vol.img[i] * slope + inter
-  const worker = new Worker('./workers/preprocess.worker.js')
+  const A = affineOf(vol)
+  const worker = new Worker('./workers/preprocess.worker.js', { type: 'module' })
   const result = await new Promise((resolve, reject) => {
     worker.onmessage = (ev) => {
       const m = ev.data
@@ -245,24 +252,15 @@ async function robustPreprocess (vol) {
     }
     worker.onerror = (e) => reject(new Error(e.message || 'falha no worker de pré-processamento'))
     worker.postMessage({
-      data: src, dims, pixDims, targetIso: 1.0,
-      doBias: $('opt-bias').checked, doSmooth: $('opt-smooth').checked
+      data: src, dims, pixDims, affine: A.flat(), targetIso: 1.0, ...flags
     }, [src.buffer])
   })
   worker.terminate()
-  // ajusta o affine: colunas escalam pela razão de reamostragem; origem desloca meio voxel
-  const A = affineOf(vol)
-  const newA = A.map(r => r.slice())
-  for (let ax = 0; ax < 3; ax++) {
-    const scale = dims[ax] / result.dims[ax]
-    for (let r = 0; r < 3; r++) {
-      newA[r][3] += A[r][ax] * (0.5 * scale - 0.5)
-      newA[r][ax] = A[r][ax] * scale
-    }
-  }
-  const buf = writeNifti({ dims: result.dims, pixDims: result.pixDims, affine: newA, datatype: 'float32', description: 'segmentarm robust pre' }, result.data)
+  const newA = [0, 1, 2, 3].map(r => result.affine.slice(r * 4, r * 4 + 4))
+  const buf = writeNifti({ dims: result.dims, pixDims: result.pixDims, affine: newA, datatype: 'float32', description: 'segmentarm preproc nativo' }, result.data)
   const file = new File([buf], 'preprocessado.nii')
-  return await NVImage.loadFromFile({ file, name: 'preprocessado.nii' })
+  const nvol = await NVImage.loadFromFile({ file, name: 'preprocessado.nii' })
+  return { vol: nvol, prov: result.prov, buf }
 }
 
 // ---------- execução de redes (workers) ----------
@@ -288,11 +286,11 @@ function runWorker (url, message, pFrom, pTo) {
   })
 }
 
-function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo) {
+function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = null) {
   log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
   return runWorker('./workers/synthseg.worker.js', {
     modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
-    img: conformed.img,
+    img: imgOverride || conformed.img,
     dims: dimsOf(conformed),
     affine: affineOf(conformed),
     isGPU,
@@ -301,8 +299,9 @@ function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo) {
   }, pFrom, pTo)
 }
 
-function runBrainchopModel (modelId, conformed, isGPU, pFrom, pTo) {
+function runBrainchopModel (modelId, conformed, isGPU, pFrom, pTo, { imgOverride = null, entryPatch = null } = {}) {
   const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
+  if (entryPatch) Object.assign(modelEntry, entryPatch)
   modelEntry.isNvidia = false
   try {
     const dbg = state.nv.gl.getExtension('WEBGL_debug_renderer_info')
@@ -318,10 +317,66 @@ function runBrainchopModel (modelId, conformed, isGPU, pFrom, pTo) {
       opts,
       modelEntry,
       niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
-      niftiImage: conformed.img
+      niftiImage: imgOverride || conformed.img
     }, pFrom, pTo),
     modelEntry
   }
+}
+
+// ---------- extração cerebral (≈ BET) ----------
+function runMaskWorker ({ prob, intensity, dims, f, normalize }) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/mask.worker.js', { type: 'module' })
+    w.onmessage = (ev) => {
+      const m = ev.data
+      if (m.cmd === 'progress') { log('· ' + m.txt); progress(0.72 + m.frac * 0.06) }
+      else if (m.cmd === 'done') { w.terminate(); resolve(m) }
+      else if (m.cmd === 'error') { w.terminate(); reject(new Error(m.message)) }
+    }
+    w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'falha no worker de máscara')) }
+    w.postMessage({ prob, intensity: Uint8Array.from(intensity), dims, f, normalize }, [prob.buffer])
+  })
+}
+
+// ?mockbet — pseudo-probabilidade a partir da intensidade conformada, para testar o
+// encadeamento (limpeza, overlay, exportações) sem custo de inferência
+function mockBrainProb (conformed) {
+  const prob = new Uint8Array(conformed.img.length)
+  for (let i = 0; i < prob.length; i++) prob[i] = Math.min(255, conformed.img[i] * 1.6)
+  return prob
+}
+
+/** máscara MeshNet (probabilidade via isScalar) + limpeza morfológica; QC overlay no NiiVue */
+async function runBrainExtraction (conformed, isGPU, variant) {
+  const f = parseFloat($('bet-f').value) || 0.5
+  let prob
+  if (new URLSearchParams(location.search).has('mockbet')) {
+    log('MOCK: máscara cerebral por limiar de intensidade')
+    prob = mockBrainProb(conformed)
+  } else {
+    log('Extração cerebral (≈ BET): inferindo probabilidade de cérebro…')
+    // isScalar devolve a softmax de "cérebro" (0–255) em vez do argmax;
+    // type Segmentation evita a binarização do caminho Brain_Masking do worker
+    prob = await runBrainchopModel(MODEL_MAP.mask[variant], conformed, isGPU, 0.55, 0.72,
+      { entryPatch: { isScalar: true, type: 'Segmentation' } }).seg
+  }
+  const m = await runMaskWorker({ prob, intensity: conformed.img, dims: dimsOf(conformed), f, normalize: $('opt-norm').checked })
+  state.bet = { mask: new Uint8Array(m.mask), brain: new Uint8Array(m.brain), f, voxels: m.voxels, normalized: !!m.normalized, cleanupLog: m.log }
+  const cm3 = m.voxels / 1000
+  if (cm3 < 700) log(`Máscara pequena (${cm3.toFixed(0)} cm³) — limiar f=${f} pode estar alto; confira a sobreposição.`, 'err')
+  // QC: sobrepõe a máscara para inspeção (o slider de rótulos controla a opacidade)
+  const nv = state.nv
+  while (nv.volumes.length > 1) await nv.removeVolume(nv.volumes[1])
+  const overlay = await conformed.clone()
+  overlay.zeroImage()
+  overlay.hdr.scl_slope = 1
+  overlay.hdr.scl_inter = 0
+  overlay.img = new Uint8Array(state.bet.mask)
+  overlay.colormap = 'red'
+  overlay.opacity = (+$('opacity').value) / 100
+  await nv.addVolume(overlay)
+  log(`Máscara cerebral: ${cm3.toFixed(0)} cm³ (f=${f}${state.bet.normalized ? ', intensidade normalizada na máscara' : ''}) — sobreposta para inspeção.`, 'ok')
+  return state.bet
 }
 
 // reconstrói a sobreposição de rótulos a partir de state.seg/state.colormap
@@ -343,6 +398,14 @@ async function refreshOverlay () {
   await nv.addVolume(overlay)
 }
 
+// habilita os botões de intermediários conforme o que esta execução produziu
+function updateIntermediateExports () {
+  const q = (k) => document.querySelector(`[data-export="${k}"]`)
+  if (q('nii-native')) q('nii-native').disabled = !state.native
+  if (q('nii-mask')) q('nii-mask').disabled = !state.bet
+  if (q('nii-brain')) q('nii-brain').disabled = !state.bet
+}
+
 // recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
 async function applySegmentationResult (labelsPath, colormapPath) {
   state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
@@ -355,11 +418,13 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     renderResults()
     await updateNorms()
     $('step-export').hidden = false
+    updateIntermediateExports()
     $('step-run').dataset.done = '1'
     log(`Volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³.`, 'ok')
   } else {
     log('Modelo sem tabela de rótulos (máscara) — estatísticas limitadas.', 'ok')
     $('step-export').hidden = false
+    updateIntermediateExports()
   }
   progress(0)
 }
@@ -423,14 +488,31 @@ async function runSegmentation () {
   try {
     const nv = state.nv
     const pipeline = effectivePipeline()
-    let workVol = state.rawVol
-    if (pipeline === 'robust') {
-      log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; não é a rede SynthSR).')
-      workVol = await robustPreprocess(state.rawVol)
-      state.pipelineUsed = 'robusto (reamostragem cúbica Catmull-Rom' + ($('opt-bias').checked ? ' + correção de viés' : '') + ($('opt-smooth').checked ? ' + suavização' : '') + ') → conformação'
-    } else {
-      state.pipelineUsed = 'padrão (conformação direta)'
+    state.native = null
+    state.bet = null
+    // etapas nativas (≈ FSL), antes da conformação: reorientação → recorte → reamostragem
+    // (só no robusto) → viés → suavização — a imagem corrigida alimenta todo o resto
+    const flags = {
+      doReorient: $('opt-reorient').checked,
+      doCrop: $('opt-crop').checked,
+      doResample: pipeline === 'robust',
+      doBias: $('opt-bias').checked,
+      doSmooth: $('opt-smooth').checked
     }
+    let workVol = state.rawVol
+    if (flags.doReorient || flags.doCrop || flags.doResample || flags.doBias || flags.doSmooth) {
+      if (pipeline === 'robust') log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; não é a rede SynthSR).')
+      state.native = await preprocessNative(state.rawVol, flags)
+      workVol = state.native.vol
+    }
+    const steps = []
+    if (flags.doReorient) steps.push('reorientação RAS')
+    if (flags.doCrop) steps.push('recorte de pescoço')
+    if (flags.doResample) steps.push('reamostragem cúbica Catmull-Rom')
+    if (flags.doBias) steps.push('correção de viés')
+    if (flags.doSmooth) steps.push('suavização')
+    state.pipelineUsed = (pipeline === 'robust' ? 'robusto (' : 'padrão (') +
+      (steps.length ? steps.join(' + ') + ' → ' : '') + 'conformação direta)'
 
     log('Conformando para 256³ · 1 mm (estilo FreeSurfer)…')
     progress(0.4)
@@ -448,16 +530,24 @@ async function runSegmentation () {
     const isGPU = $('backend').value !== 'cpu'
     let labelsPath, colormapPath, seg
 
+    // extração cerebral (≈ BET) sobre o volume conformado, antes da segmentação;
+    // a rede recebe o cérebro extraído (e normalizado, se marcado)
+    let infImg = null
+    if ($('opt-bet').checked && kind !== 'mask') {
+      await runBrainExtraction(conformed, isGPU, variant)
+      infImg = state.bet.brain
+    }
+
     if (MODEL_MAP[kind].synth) {
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, 0.45, 0.93)
+      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg)
       labelsPath = './models/synthseg1/labels.json'
       colormapPath = './models/synthseg1/colormap.json'
     } else {
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      const r = runBrainchopModel(MODEL_MAP[kind][variant], conformed, isGPU, 0.45, 0.93)
+      const r = runBrainchopModel(MODEL_MAP[kind][variant], conformed, isGPU, infImg ? 0.75 : 0.45, 0.93, { imgOverride: infImg })
       labelsPath = r.modelEntry.labelsPath
       colormapPath = r.modelEntry.colormapPath
       seg = await r.seg
@@ -649,6 +739,12 @@ function metaNow () {
     quality: state.quality,
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
+    preproc: {
+      nativo: state.native ? state.native.prov : null,
+      extracaoCerebral: state.bet
+        ? { aplicada: true, f: state.bet.f, mascara_cm3: +(state.bet.voxels / 1000).toFixed(1), normalizadaNaMascara: state.bet.normalized, limpeza: state.bet.cleanupLog }
+        : { aplicada: false }
+    },
     caveats: [
       'Uso em pesquisa e ensino; não é dispositivo médico.',
       'Volumes de exames anisotrópicos têm erro maior; reporte sequência e resolução de origem.',
@@ -699,12 +795,23 @@ async function makeExports () {
       const img = (img0 instanceof Uint8Array || img0 instanceof Int16Array || img0 instanceof Float32Array) ? img0 : Float32Array.from(img0)
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: datatypeOf(img), description: 'segmentarm imagem de análise' }, img)
       return await gzipBuffer(buf)
+    },
+    niiNative: async () => state.native ? await gzipBuffer(state.native.buf) : null,
+    niiMask: async () => {
+      if (!state.bet) return null
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: `segmentarm mascara cerebral f=${state.bet.f}` }, state.bet.mask)
+      return await gzipBuffer(buf)
+    },
+    niiBrain: async () => {
+      if (!state.bet) return null
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm cerebro extraido' }, state.bet.brain)
+      return await gzipBuffer(buf)
     }
   }
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-native', 'nii-mask', 'nii-brain'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -718,6 +825,24 @@ async function handleExport (kind) {
       case 'pdf': saveBlob(await ex.pdf(), `${sub}_relatorio.pdf`, 'application/pdf'); break
       case 'nii-seg': saveBlob(await ex.niiSeg(), `${sub}_segmentacao.nii.gz`); break
       case 'nii-conf': saveBlob(await ex.niiConf(), `${sub}_conformado.nii.gz`); break
+      case 'nii-native': {
+        const b = await ex.niiNative()
+        if (b) saveBlob(b, `${sub}_preproc_nativo.nii.gz`)
+        else log('Sem pré-processado nativo — nenhuma etapa nativa foi aplicada nesta execução.', 'err')
+        break
+      }
+      case 'nii-mask': {
+        const b = await ex.niiMask()
+        if (b) saveBlob(b, `${sub}_mascara.nii.gz`)
+        else log('Sem máscara cerebral — rode com "Extração cerebral" marcada.', 'err')
+        break
+      }
+      case 'nii-brain': {
+        const b = await ex.niiBrain()
+        if (b) saveBlob(b, `${sub}_cerebro.nii.gz`)
+        else log('Sem cérebro extraído — rode com "Extração cerebral" marcada.', 'err')
+        break
+      }
       case 'zip': {
         log('Montando o pacote…')
         const files = [
@@ -728,6 +853,11 @@ async function handleExport (kind) {
           { name: `${sub}_segmentacao.nii.gz`, data: new Uint8Array(await ex.niiSeg()) },
           { name: `${sub}_conformado.nii.gz`, data: new Uint8Array(await ex.niiConf()) }
         ]
+        if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
+        if (state.bet) {
+          files.push({ name: `${sub}_mascara.nii.gz`, data: new Uint8Array(await ex.niiMask()) })
+          files.push({ name: `${sub}_cerebro.nii.gz`, data: new Uint8Array(await ex.niiBrain()) })
+        }
         saveBlob(makeZip(files), `${sub}_segmentarm.zip`, 'application/zip')
         log('Pacote exportado.', 'ok')
         break
@@ -845,6 +975,7 @@ function wireInputs () {
 
   $('run').onclick = runSegmentation
   $('run-dkt').onclick = runDktStep
+  $('bet-f').oninput = () => { $('bet-f-out').textContent = (+$('bet-f').value).toFixed(2) }
   $('opacity').oninput = () => {
     const nv = state.nv
     if (nv.volumes.length > 1) {
