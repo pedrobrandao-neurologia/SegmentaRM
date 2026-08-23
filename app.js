@@ -18,7 +18,9 @@ const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
 
 // seleção de modelo → índice em inferenceModelsList (ids 1-based)
+// 'synthseg' é especial: usa a rede SynthSeg 1.0 original (worker próprio)
 const MODEL_MAP = {
+  synthseg: { synth: true, pt: 'SynthSeg 1.0 — rede original de Billot/Iglesias (32 estruturas)' },
   aparc104: { high: 14, low: 15, pt: 'Aparc+Aseg 104 classes (córtex E/D, cerebelo, tronco, corpo caloso)' },
   aparc50: { high: 8, low: 9, pt: 'Aparc+Aseg 50 classes' },
   aseg18: { high: 4, low: 5, pt: 'Subcortical 18 classes (aseg compacta)' },
@@ -63,9 +65,9 @@ function progress (frac) {
 async function initViewer () {
   const nv = new Niivue({
     dragAndDropEnabled: false,
-    backColor: [0.063, 0.07, 0.086, 1],
+    backColor: [0.027, 0.031, 0.039, 1],
     show3Dcrosshair: true,
-    crosshairColor: [0.71, 0.26, 0.23, 1]
+    crosshairColor: [0.88, 0.45, 0.4, 1]
   })
   await nv.attachToCanvas($('gl'))
   nv.setSliceType(nv.sliceTypeMultiplanar)
@@ -180,17 +182,17 @@ function renderQuality (q) {
   const grades = ['A', 'B', 'C', 'D']
   const gi = grades.indexOf(q.grade)
   const w = 320, seg = w / 4
-  let svg = `<svg viewBox="0 0 ${w} 56" role="img" aria-label="Qualidade nível ${q.grade}">`
+  let svg = `<svg viewBox="0 0 ${w} 72" role="img" aria-label="Qualidade nível ${q.grade}">`
   for (let i = 0; i < 4; i++) {
     const active = i === gi
-    svg += `<rect x="${i * seg + 1}" y="18" width="${seg - 4}" height="10" rx="1" fill="${active ? '#B5433A' : '#D8D3C9'}"/>`
-    svg += `<text x="${i * seg + 1}" y="46" font-family="JetBrains Mono,monospace" font-size="11" font-weight="${active ? 700 : 400}" fill="${active ? '#8E332C' : '#9BA0A6'}">${grades[i]}</text>`
+    svg += `<rect x="${i * seg + 1}" y="18" width="${seg - 4}" height="10" rx="1" fill="${active ? 'var(--accent)' : 'rgba(255,255,255,0.14)'}"/>`
+    svg += `<text x="${i * seg + 1}" y="46" font-family="JetBrains Mono,monospace" font-size="11" font-weight="${active ? 700 : 400}" fill="${active ? 'var(--accent-strong)' : 'var(--faint)'}">${grades[i]}</text>`
   }
   // marcas de régua
   for (let i = 0; i <= 16; i++) {
-    svg += `<line x1="${i * w / 16}" y1="8" x2="${i * w / 16}" y2="${i % 4 === 0 ? 15 : 12}" stroke="#C6C0B4" stroke-width="1"/>`
+    svg += `<line x1="${i * w / 16}" y1="8" x2="${i * w / 16}" y2="${i % 4 === 0 ? 15 : 12}" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>`
   }
-  svg += `<text x="${w}" y="46" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="#6B7076">${q.gradeTxt}</text></svg>`
+  svg += `<text x="1" y="66" font-family="JetBrains Mono,monospace" font-size="10" fill="var(--dim)">${q.gradeTxt}</text></svg>`
   $('ruler').innerHTML = svg
   const ul = $('findings')
   ul.innerHTML = ''
@@ -280,50 +282,92 @@ async function runSegmentation () {
     // modelo
     const kind = $('model').value
     const variant = $('mem').value === 'low' ? 'low' : 'high'
-    const modelId = MODEL_MAP[kind][variant]
-    const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
-    modelEntry.isNvidia = false
-    try {
-      const dbg = nv.gl.getExtension('WEBGL_debug_renderer_info')
-      if (dbg) modelEntry.isNvidia = String(nv.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).includes('NVIDIA')
-    } catch { /* segue como não-NVIDIA */ }
-    state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
+    const isGPU = $('backend').value !== 'cpu'
+    let labelsPath, colormapPath, seg
 
-    const opts = Object.assign({}, brainChopOpts)
-    opts.rootURL = new URL('.', location.href).href.replace(/\/$/, '')
-    opts.isGPU = $('backend').value !== 'cpu'
-    opts.telemetryFlag = false
-
-    log(`Segmentando com ${state.modelUsed} — ${opts.isGPU ? 'WebGL' : 'CPU'}…`)
-    const seg = await new Promise((resolve, reject) => {
-      const w = new Worker('./brainchop/brainchop-webworker.js', { type: 'module' })
-      state.worker = w
-      const t0 = performance.now()
-      w.onmessage = (ev) => {
-        const d = ev.data
-        if (d.cmd === 'ui') {
-          if (d.message) log('· ' + d.message)
-          if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(0.45 + d.progressFrac * 0.45)
-          if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
-        } else if (d.cmd === 'img') {
-          w.terminate(); state.worker = null
-          log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
-          resolve(new Uint8Array(d.img))
+    if (MODEL_MAP[kind].synth) {
+      // -------- SynthSeg 1.0: worker próprio (UNet com skips, blocos com sobreposição) --------
+      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
+      labelsPath = './models/synthseg1/labels.json'
+      colormapPath = './models/synthseg1/colormap.json'
+      const tile = variant === 'low' ? 96 : 128
+      log(`Segmentando com ${state.modelUsed} — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
+      seg = await new Promise((resolve, reject) => {
+        const w = new Worker('./workers/synthseg.worker.js', { type: 'module' })
+        state.worker = w
+        const t0 = performance.now()
+        w.onmessage = (ev) => {
+          const d = ev.data
+          if (d.cmd === 'ui') {
+            if (d.message) log('· ' + d.message)
+            if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(0.45 + d.progressFrac * 0.5)
+            if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+          } else if (d.cmd === 'img') {
+            w.terminate(); state.worker = null
+            log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
+            resolve(new Uint8Array(d.img))
+          }
         }
-      }
-      w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
-      w.postMessage({
-        opts,
-        modelEntry,
-        niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
-        niftiImage: conformed.img
+        w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker SynthSeg')) }
+        w.postMessage({
+          modelUrl: './models/synthseg1/model.json',
+          img: conformed.img,
+          dims: [256, 256, 256],
+          affine: affineOf(conformed),
+          isGPU,
+          tile,
+          overlap: 32
+        })
       })
-    })
+    } else {
+      // -------- família brainchop (MeshNet) --------
+      const modelId = MODEL_MAP[kind][variant]
+      const modelEntry = structuredClone(inferenceModelsList[modelId - 1])
+      modelEntry.isNvidia = false
+      try {
+        const dbg = nv.gl.getExtension('WEBGL_debug_renderer_info')
+        if (dbg) modelEntry.isNvidia = String(nv.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).includes('NVIDIA')
+      } catch { /* segue como não-NVIDIA */ }
+      state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · memória baixa' : '')
+      labelsPath = modelEntry.labelsPath
+      colormapPath = modelEntry.colormapPath
+
+      const opts = Object.assign({}, brainChopOpts)
+      opts.rootURL = new URL('.', location.href).href.replace(/\/$/, '')
+      opts.isGPU = isGPU
+      opts.telemetryFlag = false
+
+      log(`Segmentando com ${state.modelUsed} — ${isGPU ? 'WebGL' : 'CPU'}…`)
+      seg = await new Promise((resolve, reject) => {
+        const w = new Worker('./brainchop/brainchop-webworker.js', { type: 'module' })
+        state.worker = w
+        const t0 = performance.now()
+        w.onmessage = (ev) => {
+          const d = ev.data
+          if (d.cmd === 'ui') {
+            if (d.message) log('· ' + d.message)
+            if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(0.45 + d.progressFrac * 0.45)
+            if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+          } else if (d.cmd === 'img') {
+            w.terminate(); state.worker = null
+            log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
+            resolve(new Uint8Array(d.img))
+          }
+        }
+        w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
+        w.postMessage({
+          opts,
+          modelEntry,
+          niftiHeader: { datatypeCode: conformed.hdr.datatypeCode, dims: conformed.hdr.dims },
+          niftiImage: conformed.img
+        })
+      })
+    }
     state.seg = seg
 
     // rótulos e colormap
-    state.labelsMap = modelEntry.labelsPath ? await (await fetch(modelEntry.labelsPath)).json() : null
-    state.colormap = modelEntry.colormapPath ? await (await fetch(modelEntry.colormapPath)).json() : null
+    state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
+    state.colormap = colormapPath ? await (await fetch(colormapPath)).json() : null
 
     // sobreposição
     const overlay = await conformed.clone()
@@ -462,18 +506,18 @@ function renderLadder () {
   const half = (W - left - right) / 2
   const maxV = Math.max(...pairs.map(p => Math.max(p.left, p.right)))
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Assimetria esquerda-direita">`
-  svg += `<line x1="${mid}" y1="8" x2="${mid}" y2="${H - 20}" stroke="#C6C0B4" stroke-width="1"/>`
+  svg += `<line x1="${mid}" y1="8" x2="${mid}" y2="${H - 20}" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>`
   for (let i = 0; i < pairs.length; i++) {
     const p = pairs[i]
     const y = 14 + i * rowH
     const wl = p.left / maxV * (half - 6)
     const wr = p.right / maxV * (half - 6)
     const name = p.ptName.length > 34 ? p.ptName.slice(0, 33) + '…' : p.ptName
-    svg += `<text x="${left - 10}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10.5" fill="#23262A">${escapeXml(name)}</text>`
-    svg += `<rect x="${mid - wl}" y="${y}" width="${Math.max(1, wl)}" height="12" fill="#B5433A" rx="1"><title>${escapeXml(p.ptName)} E: ${Math.round(p.left)} mm³</title></rect>`
-    svg += `<rect x="${mid}" y="${y}" width="${Math.max(1, wr)}" height="12" fill="#5B6B7A" rx="1"><title>${escapeXml(p.ptName)} D: ${Math.round(p.right)} mm³</title></rect>`
+    svg += `<text x="${left - 10}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10.5" fill="var(--ink)">${escapeXml(name)}</text>`
+    svg += `<rect x="${mid - wl}" y="${y}" width="${Math.max(1, wl)}" height="12" fill="var(--accent)" rx="2"><title>${escapeXml(p.ptName)} E: ${Math.round(p.left)} mm³</title></rect>`
+    svg += `<rect x="${mid}" y="${y}" width="${Math.max(1, wr)}" height="12" fill="#5E7286" rx="2"><title>${escapeXml(p.ptName)} D: ${Math.round(p.right)} mm³</title></rect>`
     const aiTxt = (p.ai > 0 ? '+' : '') + p.ai.toFixed(1) + '%'
-    svg += `<text x="${W - 4}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="${Math.abs(p.ai) > 10 ? '#8E332C' : '#6B7076'}">${aiTxt}</text>`
+    svg += `<text x="${W - 4}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="${Math.abs(p.ai) > 10 ? 'var(--accent-strong)' : 'var(--dim)'}">${aiTxt}</text>`
   }
   svg += '</svg>'
   el.innerHTML = svg
