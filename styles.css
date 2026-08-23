@@ -122,6 +122,9 @@ a { color: var(--accent-strong); }
 .row > * { flex: 1; min-width: 0; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink); margin-bottom: 8px; cursor: pointer; }
 .check input { accent-color: var(--accent); width: 14px; height: 14px; }
+.check .eq { margin-left: auto; font-size: 10.5px; color: var(--faint); letter-spacing: .02em; white-space: nowrap; }
+.field input[type=range] { width: 100%; accent-color: var(--accent); }
+.field output { color: var(--dim); font-variant-numeric: tabular-nums; margin-left: 6px; }
 .note { font-size: 11.5px; color: var(--faint); margin: 8px 0 0; line-height: 1.45; }
 .note code { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
 

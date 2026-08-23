@@ -84,6 +84,39 @@ Cada modelo tem variantes de memória normal/baixa (convolução sequencial na �
 A primeira execução baixa <1 MB de pesos; o service worker guarda tudo e o aplicativo
 funciona **offline** depois disso.
 
+### Pré-processamento estilo FSL (portado do Morfo Studio)
+
+A seção **02 · Qualidade** expõe os equivalentes navegador das etapas estruturais clássicas
+do FSL (`lib/fsl-prep.js`, portado de
+[MorfoStudio](https://github.com/pedrobrandao-neurologia/MorfoStudio)), nesta ordem — as
+etapas nativas rodam em Web Worker antes da conformação, e a imagem corrigida alimenta
+todo o resto:
+
+| Etapa | Equivalente FSL | Como funciona aqui |
+|---|---|---|
+| Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo (a conformação já reorientava implicitamente; agora é explícito e testável) |
+| Recorte de pescoço | `robustfov` | heurística no perfil de área de primeiro plano (Otsu) do eixo S-I detectado pela affine; mantém 170 mm do topo da cabeça |
+| Correção de viés | `N4`-like | correção homomórfica existente, garantida **antes** da extração cerebral |
+| Extração cerebral | `BET` | modelo MeshNet de máscara com **probabilidade** (softmax via `isScalar`), limiar **f configurável** (0,1–0,9; maior = máscara menor), fechamento morfológico, maior componente 26-conexo e preenchimento de cavidades — a máscara é **sobreposta no visualizador** para inspeção e a rede recebe só o cérebro |
+| Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara; a segmentação de tecidos (modelo Tecidos) dá SC/SB/líquor no painel |
+
+Os intermediários saem nos botões de exportação (**pré-processado nativo, máscara e cérebro
+extraído** em `.nii.gz`, também no pacote `.zip`) e o JSON registra a **proveniência**
+(`preprocessamento`: etapas aplicadas e parâmetros).
+
+**Sobre o niimath** (avaliado antes de reimplementar): o
+[niimath](https://github.com/rordenlab/niimath) WASM (~723 KB, BSD-2) tem `-robustfov`
+exato, mas **não** tem `fslreorient2std` (o `-conform` dele reamostra) nem BET — como a
+reorientação teria de ser JS de qualquer forma e a morfologia já existia, ficou tudo em
+JS puro (~150 linhas), sem custo de download. O niimath continua sendo a opção natural
+se um dia for preciso um `fslmaths` genérico.
+
+**Limitações declaradas**: o recorte é heurístico (≠ robustfov exato); a extração usa a
+rede de máscara do brainchop (≠ superfície deformável do BET); mascarar/normalizar muda o
+domínio visto pelos MeshNet, que foram treinados em cabeça inteira conformada — use a
+sobreposição de QC e compare com e sem as opções. O SynthSeg tolera entrada com ou sem
+crânio por natureza.
+
 ### O modo robusto não é o SynthSR
 
 Quando a régua marca C/D (FLAIR axial de 5 mm, poucos cortes, baixo campo), o ramo robusto
