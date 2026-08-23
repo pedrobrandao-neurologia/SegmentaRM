@@ -310,7 +310,7 @@ async function runSegmentation () {
         }
         w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker SynthSeg')) }
         w.postMessage({
-          modelUrl: './models/synthseg1/model.json',
+          modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
           img: conformed.img,
           dims: [256, 256, 256],
           affine: affineOf(conformed),
