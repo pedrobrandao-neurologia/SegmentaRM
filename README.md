@@ -55,20 +55,35 @@ contraste/resolução-agnóstico do método — a rede é a mesma do `mri_synths
 Duas camadas ausentes no tfjs foram implementadas em `lib/tfjs-upsampling3d.js`
 (UpSampling3D por repetição e BatchNorm congelado para rank 5).
 
-### Parcelação cortical DKT sobre o SynthSeg
+### Parcelação cortical DKT — agora com o FastSurfer de verdade
 
 A parcelação DKT é um **passo separado** (04 · Parcelação DKT), aplicado sobre um resultado
 **SynthSeg** ou **Subcortical 18 (aseg compacta)** já pronto — se algo falhar, a segmentação
-feita permanece intacta e não é preciso reprocessar. O esquema replica o `--parc` do
-SynthSeg 2.0 (`predict_synthseg.py`: `mask = (seg==3)|(seg==42); seg[mask] = parcelação[mask]`),
-no espírito do `aparc` do FastSurfer: a fonte da parcelação é a rede DKT embarcada
-(aparc+aseg 104 do brainchop, MIT) rodada sobre o mesmo volume conformado; voxels de córtex
-sem parcela recebem a parcela modal da vizinhança por propagação (`lib/dkt-fusion.js`).
+feita permanece intacta e não é preciso reprocessar. A fusão replica o `--parc` do
+SynthSeg 2.0 (`predict_synthseg.py`: `seg[mask de córtex] = parcelação[mask]`), com
+propagação modal por vizinhança para voxels sem parcela (`lib/dkt-fusion.js`).
+
+A **fonte recomendada** da parcelação é a **FastSurferCNN**
+([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et al.,
+*NeuroImage* 2020) — os **checkpoints oficiais v1** (axial/coronal/sagital,
+`Epoch_30_training_state.pkl`) convertidos para tfjs float16 com as BatchNorm dobradas
+(`tools/convert_fastsurfer_tfjs.py`, 3,6 MB por vista; paridade numérica verificada:
+argmax concorda em 99,98% com a referência, em fatias reais). É exatamente a rede
+volumétrica cujo `aparc.DKTatlas+aseg` o **recon-surf** depois refina em superfícies —
+o recon-surf em si (malhas, registro esférico, binários C++ do FreeSurfer, horas de CPU)
+**não é executável no navegador**; o que se embarca é a parcelação volumétrica que o
+alimenta. A inferência replica o `fastsurfer_inference` v1: fatias espessas de 7 cortes,
+**agregação de vistas** (0,4·axial + 0,4·coronal + 0,2·sagital, em logits), restrita à
+fita cortical da segmentação-fonte (por isso cabe na memória do navegador); as 19 regiões
+que a v1 não lateraliza são atribuídas por componente conexo contra a linha média
+(adaptação do fix por centroide de substância branca do pipeline oficial). Há uma opção
+**axial+coronal** (mais rápida, pesos renormalizados) e a rede DKT do brainchop continua
+disponível como alternativa.
+
 No SynthSeg, o hemisfério do córtex vem da própria segmentação (E=2/D=19, a autoridade,
-como no mascaramento oficial); na aseg compacta o córtex é bilateral, e o hemisfério de
-cada voxel vem da rede DKT (com propagação para os voxels que ela não parcelou).
-Estruturas ausentes num sujeito são aceitas — a contagem de rótulos menor que a esperada
-é aviso, não erro.
+como no mascaramento oficial); na aseg compacta o córtex é bilateral e o hemisfério vem
+da parcelação. Estruturas ausentes num sujeito são aceitas — contagem menor de rótulos é
+aviso, não erro.
 
 ### Modelos embarcados (brainchop, licença MIT)
 
@@ -216,6 +231,11 @@ Tema escuro grafite/osso/vermelho-córtex com princípios das HIG da Apple: resp
   ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): pesos originais
   `synthseg_1.0.h5` convertidos para tfjs. Cite *SynthSeg: Segmentation of brain MRI scans
   of any contrast and resolution without retraining* (Medical Image Analysis, 2023).
+- **FastSurfer** — Henschel, Conjeti, Estrada, Diers, Fischl, Reuter
+  ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0): checkpoints
+  oficiais do FastSurferCNN v1 convertidos para tfjs (`licenses/fastsurfer.txt`). Cite
+  *FastSurfer — A fast and accurate deep learning based neuroimaging pipeline*
+  (NeuroImage, 2020).
 - **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT): worker de inferência e modelos MeshNet.
 - **NiiVue** e **dcm2niix** — Rorden e colaboradores.
 - Linhagem conceitual: **SynthSeg / SynthSR / recon-all-clinical** — Billot, Gopinath, Iglesias
