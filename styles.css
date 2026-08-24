@@ -162,6 +162,21 @@ input::placeholder { color: var(--faint); }
 .tag { color: var(--ink); background: rgba(20, 22, 28, 0.6); border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .hud-ctl { display: flex; gap: 8px; align-items: center; }
 .hud-ctl input[type=range] { width: 130px; accent-color: var(--accent); }
+.hud-btn {
+  font: 12px/1 var(--mono); letter-spacing: .04em; color: var(--dim);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line-strong);
+  border-radius: 7px; padding: 5px 10px; cursor: pointer;
+  transition: transform 100ms ease-out, background 120ms ease-out, color 120ms ease-out;
+}
+.hud-btn:active { transform: scale(0.96); }
+.hud-btn[aria-pressed="true"] { color: #fff; background: var(--accent-deep); border-color: var(--accent); }
+#wl-layer {
+  position: absolute; inset: 0; z-index: 3;
+  cursor: all-scroll; touch-action: none;
+}
+@media (prefers-contrast: more) {
+  .hud-btn { border-color: var(--ink); color: var(--ink); }
+}
 .hud-sel { width: auto; background: rgba(20, 22, 28, 0.6); border-color: var(--line); backdrop-filter: blur(8px); }
 
 .dropwrap {
