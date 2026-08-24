@@ -50,6 +50,9 @@ const state = {
   norms: null,
   native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
+  wl: null,            // janela de exibição atual { min, max } do volume base
+  wlRange: 255,        // amplitude de referência (p99−p1) para escalar o arrasto
+  rebuilding: false,
   cohort: []
 }
 
@@ -90,6 +93,154 @@ async function initViewer () {
     } catch { /* localizações fora do volume */ }
   }
   state.nv = nv
+}
+
+function applySliceType () {
+  const nv = state.nv
+  const v = $('slicetype').value
+  if (v === 'multi') nv.setSliceType(SLICE_TYPE.MULTIPLANAR)
+  else if (v === 'axial') nv.setSliceType(SLICE_TYPE.AXIAL)
+  else if (v === 'coronal') nv.setSliceType(SLICE_TYPE.CORONAL)
+  else if (v === 'sagittal') nv.setSliceType(SLICE_TYPE.SAGITTAL)
+  else nv.setSliceType(SLICE_TYPE.RENDER)
+}
+
+// ---------- janelamento (window/level) ----------
+function baseVol () {
+  return state.nv && state.nv.volumes.length ? state.nv.volumes[0] : null
+}
+
+function applyWindow (min, max) {
+  const v = baseVol()
+  if (!v) return
+  v.cal_min = min
+  v.cal_max = max
+  state.wl = { min, max }
+  try { state.nv.updateGLVolume() } catch { /* contexto pode estar perdido; o guard reconstrói */ }
+}
+
+// janela automática: percentis 1–99 dos voxels acima do fundo (amostrado)
+function autoWindow () {
+  const v = baseVol()
+  if (!v || !v.img || !v.img.length) return
+  const img = v.img
+  const slope = v.hdr && v.hdr.scl_slope ? v.hdr.scl_slope : 1
+  const inter = (v.hdr && v.hdr.scl_inter) || 0
+  const step = Math.max(1, Math.floor(img.length / 400000))
+  const vals = []
+  for (let i = 0; i < img.length; i += step) {
+    const x = img[i]
+    if (x > 0) vals.push(x)
+  }
+  if (vals.length < 100) return
+  vals.sort((a, b) => a - b)
+  const p1 = vals[Math.floor(0.01 * (vals.length - 1))] * slope + inter
+  const p99 = vals[Math.floor(0.99 * (vals.length - 1))] * slope + inter
+  if (!(p99 > p1)) return
+  state.wlRange = p99 - p1
+  applyWindow(p1, p99)
+}
+
+// arrasto de janelamento: ↔ ajusta a largura (contraste), ↕ o nível (brilho);
+// resposta no pointer-down, 1:1 com o mouse via rAF, duplo clique volta ao automático
+function initWindowing () {
+  const layer = $('wl-layer')
+  const btn = $('wl-toggle')
+  const readout = $('loc')
+  btn.onclick = () => {
+    const on = btn.getAttribute('aria-pressed') !== 'true'
+    btn.setAttribute('aria-pressed', String(on))
+    layer.hidden = !on
+    if (on) {
+      if (!state.wl) autoWindow()
+      const w = state.wl ? state.wl.max - state.wl.min : 0
+      const l = state.wl ? (state.wl.max + state.wl.min) / 2 : 0
+      readout.textContent = `janela ${w.toFixed(0)} · nível ${l.toFixed(0)} — arraste (↔ contraste · ↕ brilho); duplo clique = automático`
+    } else {
+      readout.textContent = '—'
+    }
+  }
+  let dragging = false
+  let sx = 0, sy = 0, w0 = 0, l0 = 0
+  let raf = 0
+  let last = null
+  const apply = () => {
+    raf = 0
+    if (!last) return
+    const k = (state.wlRange || 255) / 300
+    const w = Math.max((state.wlRange || 255) / 128, w0 + (last.clientX - sx) * k)
+    const l = l0 + (last.clientY - sy) * k
+    applyWindow(l - w / 2, l + w / 2)
+    readout.textContent = `janela ${w.toFixed(0)} · nível ${l.toFixed(0)}`
+  }
+  layer.addEventListener('pointerdown', (e) => {
+    if (!baseVol()) return
+    layer.setPointerCapture(e.pointerId)
+    dragging = true
+    if (!state.wl) autoWindow()
+    sx = e.clientX; sy = e.clientY
+    w0 = state.wl.max - state.wl.min
+    l0 = (state.wl.max + state.wl.min) / 2
+    last = e
+    apply()
+    e.preventDefault()
+  })
+  layer.addEventListener('pointermove', (e) => {
+    if (!dragging) return
+    last = e
+    if (!raf) raf = requestAnimationFrame(apply)
+  })
+  const end = (e) => { dragging = false; last = null }
+  layer.addEventListener('pointerup', end)
+  layer.addEventListener('pointercancel', end)
+  layer.addEventListener('dblclick', () => {
+    autoWindow()
+    readout.textContent = 'janelamento automático'
+  })
+}
+
+// ---------- resiliência: perda de contexto WebGL (comum após inferência pesada na GPU) ----------
+function armContextGuard () {
+  const c = $('gl')
+  c.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault()
+    log('Contexto WebGL do visualizador perdido (pressão de GPU) — reconstruindo…', 'err')
+    setTimeout(() => { rebuildViewer() }, 250)
+  })
+}
+
+async function rebuildViewer () {
+  if (state.rebuilding) return
+  state.rebuilding = true
+  try {
+    const old = $('gl')
+    const fresh = old.cloneNode(false)
+    old.replaceWith(fresh)
+    await initViewer()
+    armContextGuard()
+    const vol = state.conformed || state.rawVol
+    if (vol) {
+      await state.nv.addVolume(vol)
+      if (state.seg && state.conformed) await refreshOverlay()
+    }
+    if (state.wl) applyWindow(state.wl.min, state.wl.max)
+    else autoWindow()
+    applySliceType()
+    log('Visualizador restaurado.', 'ok')
+  } catch (e) {
+    log('Não consegui restaurar o visualizador: ' + e.message, 'err')
+  } finally {
+    state.rebuilding = false
+  }
+}
+
+async function ensureViewerAlive () {
+  try {
+    if (state.nv && state.nv.gl && state.nv.gl.isContextLost && state.nv.gl.isContextLost()) {
+      log('Visualizador com contexto WebGL perdido — restaurando antes de continuar…')
+      await rebuildViewer()
+    }
+  } catch { /* melhor seguir do que travar o fluxo */ }
 }
 
 function deviceBadge () {
@@ -168,6 +319,8 @@ async function loadVolumeFile (file, sidecar, desc) {
   $('run-dkt').disabled = true
   state.sidecar = sidecar || null
   state.inputDesc = desc
+  state.wl = null
+  autoWindow()
   $('viewer-block').hidden = false
   $('empty').hidden = true
   $('results').hidden = true
@@ -364,6 +517,7 @@ async function runBrainExtraction (conformed, isGPU, variant) {
   }
   const m = await runMaskWorker({ prob, intensity: conformed.img, dims: dimsOf(conformed), f, normalize: $('opt-norm').checked })
   if (!m.voxels) throw new Error(`extração cerebral produziu máscara vazia (f=${f}) — reduza o limiar f ou desmarque a extração cerebral`)
+  await ensureViewerAlive()
   state.bet = { mask: new Uint8Array(m.mask), brain: new Uint8Array(m.brain), f, voxels: m.voxels, normalized: !!m.normalized, cleanupLog: m.log }
   const cm3 = m.voxels / 1000
   if (cm3 < 700) log(`Máscara pequena (${cm3.toFixed(0)} cm³) — limiar f=${f} pode estar alto; confira a sobreposição.`, 'err')
@@ -411,6 +565,7 @@ function updateIntermediateExports () {
 
 // recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
 async function applySegmentationResult (labelsPath, colormapPath) {
+  await ensureViewerAlive()
   state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
   state.colormap = colormapPath ? await (await fetch(colormapPath)).json() : null
   await refreshOverlay()
@@ -554,6 +709,8 @@ async function runSegmentation () {
     while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
     await nv.addVolume(conformed)
     state.conformed = conformed
+    state.wl = null
+    autoWindow()
     log('Conformação concluída.', 'ok')
 
     // modelo
@@ -1015,15 +1172,7 @@ function wireInputs () {
       nv.drawScene()
     }
   }
-  $('slicetype').onchange = () => {
-    const nv = state.nv
-    const v = $('slicetype').value
-    if (v === 'multi') nv.setSliceType(SLICE_TYPE.MULTIPLANAR)
-    else if (v === 'axial') nv.setSliceType(SLICE_TYPE.AXIAL)
-    else if (v === 'coronal') nv.setSliceType(SLICE_TYPE.CORONAL)
-    else if (v === 'sagittal') nv.setSliceType(SLICE_TYPE.SAGITTAL)
-    else nv.setSliceType(SLICE_TYPE.RENDER)
-  }
+  $('slicetype').onchange = applySliceType
   $('filter').oninput = renderTable
   $('group-filter').onchange = renderTable
   $('subject').oninput = () => { $('stage-title').textContent = $('subject').value || 'Exame' }
@@ -1038,6 +1187,8 @@ function wireInputs () {
 async function main () {
   deviceBadge()
   await initViewer()
+  armContextGuard()
+  initWindowing()
   wireInputs()
   try {
     state.cohort = JSON.parse(localStorage.getItem('segmentarm_cohort_v1') || '[]')

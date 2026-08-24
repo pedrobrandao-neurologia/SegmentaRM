@@ -145,11 +145,13 @@
 
   <!-- palco central: o visualizador é a peça principal -->
   <main class="view" id="viewer-block">
-    <div class="canvasbox"><canvas id="gl"></canvas></div>
+    <div class="canvasbox"><canvas id="gl"></canvas><div id="wl-layer" hidden></div></div>
 
     <div class="hud">
       <span class="tag" id="loc">—</span>
       <span class="spacer"></span>
+      <button class="hud-btn" id="wl-toggle" aria-pressed="false"
+        title="Janelamento manual: com o botão ativo, arraste sobre a imagem — ↔ contraste (largura da janela) · ↕ brilho (nível). Duplo clique restaura o automático.">janela</button>
       <label class="hud-ctl">rótulos <input type="range" id="opacity" min="0" max="100" value="55"></label>
       <select id="slicetype" class="hud-sel">
         <option value="multi" selected>Multiplanar</option>
