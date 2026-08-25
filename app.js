@@ -359,6 +359,7 @@ async function viewDeliverable (kind, label = '') {
     else if (kind === 'synthsr') base = state.synthsr && state.synthsr.vol
     else if (kind === 'conf' || kind === 'seg' || kind === 'mask') base = state.conformed
     else if (kind === 'brain') base = state.bet && await intermediateVol('brain', state.bet.brain, 'uint8', 'cérebro extraído')
+    else if (kind === 'norm') base = state.surf && state.surf.norm && await intermediateVol('norm', state.surf.norm, 'float32', 'norm sintético recon-clinical')
     if (!base) { log('Este entregável não está mais disponível — rode a etapa de novo.', 'err'); return }
     while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
     await nv.addVolume(base)
@@ -759,6 +760,7 @@ async function loadVolumeFile (file, sidecar, desc) {
   $('step-quality').hidden = false
   $('step-run').hidden = false
   $('run').disabled = false
+  if ($('run-clinical')) $('run-clinical').disabled = false
   $('stage-title').textContent = ($('subject').value || file.name.replace(/\.nii(\.gz)?$/i, ''))
   $('stage-lede').textContent = `${desc} — ${dims.join('×')} voxels de ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm. ` +
     `Régua de qualidade: nível ${state.quality.grade} (${state.quality.gradeTxt}).`
@@ -1044,6 +1046,8 @@ function updateIntermediateExports () {
   if (q('nii-synthsr')) q('nii-synthsr').disabled = !state.synthsr
   if (q('nii-mask')) q('nii-mask').disabled = !state.bet
   if (q('nii-brain')) q('nii-brain').disabled = !state.bet
+  if (q('nii-norm')) q('nii-norm').disabled = !(state.surf && state.surf.norm)
+  if (q('xfm')) q('xfm').disabled = !(state.surf && state.surf.xfm)
 }
 
 // recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
@@ -1218,10 +1222,23 @@ async function runSurfStep () {
   state.running = true
   $('run-surf').disabled = true
   $('run').disabled = true
+  viewCache.delete('norm')
   try {
-    log('Reconstruindo superfícies white/pial por hemisfério (surface nets + Taubin; espessura por EDT)…')
+    // motor recon-all-clinical: SDF da rede SynthDist quando os pesos convertidos
+    // estiverem em models/synthsurf/ (traga-seus-pesos; licença do FreeSurfer),
+    // senão SDF por EDT exata das máscaras (fallback declarado)
+    let engine = $('surf-engine') ? $('surf-engine').value : 'edt'
+    if (engine === 'net') {
+      const have = await fetch('./models/synthsurf/model.json', { method: 'HEAD' }).then(r2 => r2.ok).catch(() => false)
+      if (!have) {
+        log('Rede SynthDist não instalada (models/synthsurf/ ausente) — usando SDF por EDT. Veja licenses/synthsurf.txt para instalar os pesos.', 'err')
+        tlNote('surf', 'rede SynthDist ausente — caindo para SDF por EDT das máscaras', 'warn')
+        engine = 'edt'
+      }
+    }
+    log(`Superfícies no fluxo recon-all-clinical: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → colocação pela energia da Eq. 5 → espessura Fischl–Dale…`)
     const r = await new Promise((resolve, reject) => {
-      const w = new Worker('./workers/surface.worker.js', { type: 'module' })
+      const w = new Worker('./workers/reconsurf.worker.js', { type: 'module' })
       w.onmessage = (ev) => {
         const m = ev.data
         if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.1 + m.frac * 0.85) }
@@ -1235,20 +1252,44 @@ async function runSurfStep () {
         affine: affineOf(state.conformed).flat(),
         labels: state.labelsMap,
         colormap: state.colormap,
-        voxVol: voxVolOf(state.conformed)
+        voxVol: voxVolOf(state.conformed),
+        engine,
+        img: engine === 'net' ? Float32Array.from(state.conformed.img) : null,
+        modelUrl: engine === 'net' ? new URL('./models/synthsurf/model.json', location.href).href : null,
+        isGPU: $('backend').value !== 'cpu',
+        tile: $('mem').value === 'low' ? 64 : 96
       })
     })
     if (r.aviso) { log('Aviso: ' + r.aviso, 'err'); tlNote('surf', r.aviso, 'warn') }
     for (const reg of r.stats) reg.pt = ptNameOf(reg.name)
-    state.surf = { meshes: r.meshes, stats: r.stats }
+    state.surf = {
+      meshes: r.meshes,
+      stats: r.stats,
+      euler: r.euler || null,
+      motor: r.engineUsed === 'net' ? 'rede SynthDist' : 'SDF por EDT das máscaras',
+      xfm: r.xfm || null,
+      talairachRotulos: r.talairach ? r.talairach.nUsed : 0,
+      norm: r.norm || null
+    }
     renderSurfStats()
     $('show-surf').disabled = false
     $('show-surf').checked = true
     await ensureViewerAlive()
     await showSurfaces(true)
-    log(`Superfícies prontas: ${r.meshes.length} malhas, ${r.stats.length} regiões com espessura/área.`, 'ok')
-    tlNote('surf', `${r.meshes.length} malhas white/pial · ${r.stats.length} regiões com espessura/área (Fischl–Dale)`)
-    tlDone('surf', [{ label: 'malhas 3D', view: 'surf' }, { label: 'voltar à parcelação', view: 'seg' }], r.aviso ? 'warn' : 'ok')
+    updateIntermediateExports()
+    const eulTxt = r.euler ? `χ de Euler E/D = ${r.euler.lh ?? '—'}/${r.euler.rh ?? '—'}` : ''
+    const eulOk = r.euler && r.euler.lh === 2 && r.euler.rh === 2
+    log(`Superfícies prontas (${state.surf.motor}): ${r.meshes.length} malhas, ${r.stats.length} regiões. ${eulTxt}${eulOk ? ' (topologia esférica ✓)' : ''}`, 'ok')
+    if (r.euler && !eulOk) log(`QC: ${eulTxt} ≠ 2 — defeitos topológicos não corrigidos (sem mris_fix_topology); interprete espessuras locais com cautela.`, 'err')
+    tlNote('surf', `motor: ${state.surf.motor} → colocação Eq. 5 → espessura Fischl–Dale (teto 5 mm)`, 'decision')
+    if (r.euler) tlNote('surf', `QC de topologia: ${eulTxt}${eulOk ? ' — esférica ✓' : ' — defeitos NÃO corrigidos'}`, eulOk ? 'info' : 'warn')
+    if (r.xfm) tlNote('surf', `talairach.xfm por centros de massa (${state.surf.talairachRotulos} rótulos casados com o MNI)`)
+    tlNote('surf', `${r.meshes.length} malhas white/pial · ${r.stats.length} regiões com espessura/área`)
+    tlDone('surf', [
+      { label: 'malhas 3D', view: 'surf' },
+      { label: 'norm sintético', view: 'norm' },
+      { label: 'voltar à parcelação', view: 'seg' }
+    ], (r.aviso || (r.euler && !eulOk)) ? 'warn' : 'ok')
     progress(0)
   } catch (e) {
     log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
@@ -1258,6 +1299,30 @@ async function runSurfStep () {
     state.running = false
     $('run').disabled = false
     $('run-surf').disabled = false
+  }
+}
+
+// ---------- pipeline completo recon-all-clinical (03 → 04 → 05) ----------
+// encadeia SynthSeg → parcelação DKT → superfícies por SDF; cada etapa preserva
+// a anterior e os erros passam pelo tutorial/log normais de cada passo
+async function runReconClinical () {
+  if (state.running || !state.rawVol) return
+  const btn = $('run-clinical')
+  if (btn) btn.disabled = true
+  try {
+    log('Pipeline recon-all-clinical (navegador): segmentação SynthSeg → parcelação DKT → superfícies por SDF.', 'ok')
+    if ($('model').value !== 'synthseg') {
+      $('model').value = 'synthseg'
+      log('Modelo ajustado para SynthSeg 1.0 — o recon-all-clinical segmenta com o SynthSeg (agnóstico a contraste/resolução).')
+    }
+    await runSegmentation()
+    if (!state.seg || state.segKind !== 'synthseg') { log('Pipeline interrompido: a segmentação não concluiu.', 'err'); return }
+    await runDktStep()
+    if (!/-dkt$/.test(state.segKind)) { log('Pipeline interrompido: a parcelação DKT não concluiu — o resultado SynthSeg permanece.', 'err'); return }
+    await runSurfStep()
+    if (state.surf) log('Pipeline recon-all-clinical concluído: volumes, parcelação, superfícies com espessura, norm sintético e talairach.xfm prontos para exportação.', 'ok')
+  } finally {
+    if (btn) btn.disabled = !state.rawVol
   }
 }
 
@@ -1611,7 +1676,15 @@ function metaNow () {
     quality: state.quality,
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
-    surf: state.surf ? { regioes: state.surf.stats } : null,
+    surf: state.surf
+      ? {
+          regioes: state.surf.stats,
+          motorSdf: state.surf.motor || null,
+          euler: state.surf.euler || null,
+          talairachRotulos: state.surf.talairachRotulos || 0,
+          fluxo: 'recon-all-clinical (navegador): máscaras wm.seg/filled → SDFs white/pial → colocação Eq. 5 (λ1=6e-4, λ2=2e-4, nsmooth 5) → Fischl–Dale (teto 5 mm); sem mris_fix_topology/sphere.reg (χ de Euler relatado como QC; parcelas por amostragem volumétrica)'
+        }
+      : null,
     preproc: {
       nativo: state.native ? state.native.prov : null,
       synthsr: state.synthsr
@@ -1674,6 +1747,12 @@ async function makeExports () {
     },
     niiNative: async () => state.native ? await gzipBuffer(state.native.buf) : null,
     niiSynthsr: async () => state.synthsr ? await gzipBuffer(state.synthsr.buf) : null,
+    niiNorm: async () => {
+      if (!state.surf || !state.surf.norm) return null
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'float32', description: 'segmentarm norm sintetico recon-clinical' }, state.surf.norm)
+      return await gzipBuffer(buf)
+    },
+    xfm: () => state.surf && state.surf.xfm ? state.surf.xfm : null,
     niiMask: async () => {
       if (!state.bet) return null
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: `segmentarm mascara cerebral f=${state.bet.f}` }, state.bet.mask)
@@ -1688,7 +1767,7 @@ async function makeExports () {
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'nii-norm', 'xfm', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -1720,6 +1799,18 @@ async function handleExport (kind) {
         else log('Sem máscara cerebral — rode com "Extração cerebral" marcada.', 'err')
         break
       }
+      case 'nii-norm': {
+        const b = await ex.niiNorm()
+        if (b) saveBlob(b, `${sub}_norm_sintetico.nii.gz`)
+        else log('Sem norm sintético — rode o passo 05 (superfícies).', 'err')
+        break
+      }
+      case 'xfm': {
+        const b = ex.xfm()
+        if (b) saveBlob(b, `${sub}_talairach.xfm`, 'text/plain;charset=utf-8')
+        else log('Sem transformada de Talairach — rode o passo 05 (superfícies).', 'err')
+        break
+      }
       case 'nii-brain': {
         const b = await ex.niiBrain()
         if (b) saveBlob(b, `${sub}_cerebro.nii.gz`)
@@ -1738,6 +1829,8 @@ async function handleExport (kind) {
         ]
         if (state.surf) {
           for (const m of state.surf.meshes) files.push({ name: `${sub}_${m.name}.mz3`, data: new Uint8Array(m.mz3) })
+          if (state.surf.xfm) files.push({ name: `${sub}_talairach.xfm`, data: new TextEncoder().encode(state.surf.xfm) })
+          if (state.surf.norm) files.push({ name: `${sub}_norm_sintetico.nii.gz`, data: new Uint8Array(await ex.niiNorm()) })
         }
         if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
         if (state.synthsr) files.push({ name: `${sub}_synthsr_mprage.nii.gz`, data: new Uint8Array(await ex.niiSynthsr()) })
@@ -1860,6 +1953,7 @@ function wireInputs () {
   }
 
   $('run').onclick = runSegmentation
+  $('run-clinical').onclick = runReconClinical
   $('run-dkt').onclick = runDktStep
   $('run-surf').onclick = runSurfStep
   $('show-surf').onchange = () => showSurfaces($('show-surf').checked)

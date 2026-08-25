@@ -35,7 +35,8 @@ Arquivo .nii/.nii.gz ───────────────────�
                                         ▼
                  04 · Parcelação DKT — FastSurferCNN (3 vistas) sobre a fita cortical
                                         ▼
-                 05 · Superfícies — white/pial por hemisfério + espessura/área por região
+                 05 · Superfícies (recon-all-clinical) — SDFs white/pial → colocação
+                     Eq. 5 → espessura Fischl–Dale · χ de Euler · norm · talairach.xfm
                                         ▼
      Estatísticas: volumes, % do encéfalo, hemisférios, lobos, assimetria,
      comparação normativa (percentil/z por idade e sexo) e tabela estilo aparc.stats
@@ -162,28 +163,50 @@ contra a linha média. Há a opção **axial+coronal** (mais rápida) e a rede D
 brainchop como alternativa. Estruturas ausentes num sujeito são aceitas — contagem menor
 de rótulos é aviso, não erro.
 
-## Superfícies corticais (passo 05) — o análogo navegador do recon-surf
+## O pipeline recon-all-clinical no navegador — mapa de fidelidade
 
-Sobre um resultado com parcelação DKT, reconstrói as malhas **white** e **pial** por
-hemisfério e calcula a tabela estilo `aparc.stats` — **espessura média ± dp, área pial e
-volume por região DKT** — no inspetor e em todas as exportações. A pial aparece **no
-painel central**, colorida pelas parcelas (chave "Mostrar 3D"). O mapeamento honesto com
-o `recon-surf` (que continua sendo binário FreeSurfer, horas de CPU, e **não roda em
-navegador**):
+O passo 05 (e o botão **"Pipeline completo (recon-all-clinical)"** no passo 03, que
+encadeia 03→04→05) reproduz o fluxo do `recon-all-clinical.sh` (Gopinath et al.,
+*Medical Image Analysis* 2025). A tabela abaixo mapeia **cada etapa do script oficial**
+(lido do código-fonte, branch dev do `freesurfer/freesurfer`) ao que roda aqui — para
+uso em pesquisa, cite o que é reprodução e o que é aproximação:
 
-| recon-surf | Aqui (`lib/surfaces.js`, Web Worker, segundos) |
-|---|---|
-| `mri_fill` | máscaras white/pial por hemisfério + fechamento, maior componente, cavidades |
-| `mri_mc` / `mri_tessellate` | **surface nets** (malha fechada 2-variedade; esfera-teste: volume −0,6%) |
-| `mris_smooth` | **Taubin** λ\|μ, que não encolhe (área da esfera a +0,2% do analítico) |
-| `sample_parc` | parcela por vértice amostrando o volume — mesma filosofia do FastSurfer |
-| `mris_place_surface` → thickness | **pareamento de superfícies Fischl–Dale** (*PNAS* 2000): T = ½·[d(white→pial) + d(pial→white)], vértice a vértice entre as malhas suavizadas (fantasma de 3 mm: 2,77) |
-| `mris_anatomical_stats` | espessura/área/volume por região |
-| `mris_sphere` + `mris_register` | **não existe** — análise vertex-wise entre sujeitos exige o FreeSurfer/FastSurfer reais |
+| recon-all-clinical.sh | Aqui | Fidelidade |
+|---|---|---|
+| `mri_synthseg --robust --parc` | SynthSeg 1.0 (rede original) + parcelação DKT da FastSurferCNN | **análogo declarado** — é a versão 1.0 + FastSurfer, não o SynthSeg+ hierárquico com QC (planejado) |
+| `mri_synthsr` (visualização) | SynthSR v1.0 original (paridade r=0,997) | **exato** (em blocos) |
+| SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | rede **SynthDist com pesos convertidos pelo usuário** (`tools/convert_synthsurf_tfjs.py`; a licença do FreeSurfer impede redistribuir) **ou** SDF por EDT exata das máscaras | **exato** com a rede instalada; **aproximação declarada** no fallback (EDT não tem o volume parcial aprendido) |
+| `wm.seg.mgz` / `filled.mgz` (regras de rótulos; partição E/D por EDT) | mesmas regras, mesma partição por EDT | **exato** |
+| `norm.mgz` sintético (70·tanh(2(W+0,3)) + 40·tanh(2P), máscara dilatada 3) | fórmula idêntica; exportável (`Norm sintético`) | **exato** |
+| `talairach.xfm` (COGs medianos vs. tabela do ICBM152, `getM`) | porte exato, mesma tabela de COGs; exportável | **exato** |
+| `mri_pretess` + `mri_tessellate` + `mris_extract_main_component` | fechamento + maior componente + cavidades + **surface nets** | **análogo** (tesselação diferente, mesma função) |
+| `mris_sphere -q` + `mris_fix_topology` + `mris_remesh` | **não portado** — a característica de Euler (χ) é calculada e relatada como QC; χ≠2 vira aviso | **ausente, declarado** |
+| `mris_place_surface --white --nsmooth 5` / `--pial --repulse-surf` | descida de gradiente na **energia da Eq. 5 do artigo** (tanh(D)² + molas λ₁=6·10⁻⁴/λ₂=2·10⁻⁴ de Dale 1999), nsmooth 5 na white, pial parte da white com repulsão | **reprodução do método do artigo** (o script oficial equivalente cola as SDFs na imagem sintética e roda o `mris_place_surface` clássico) |
+| `mris_register` (sphere.reg, atlas acfb40) + `mris_ca_label` | **não portado** — parcelas por amostragem volumétrica DKT nos vértices da white (≈ `sample_parc`); **sem correspondência vertex-wise com o fsaverage** | **ausente, declarado** |
+| `--thickness ... 20 5` (Fischl & Dale 2000, teto 5 mm) | pareamento branca↔pial nos dois sentidos, teto 5 mm | **mesma definição** (busca por grade, não por nhops) |
+| `mris_anatomical_stats` | espessura ± dp, **área na white** (como o aparc.stats), volume por parcela | **análogo** (volume por contagem de voxels, não ribbon) |
+| `mri_cc` (corpo caloso), BA_exvivo/vpnl | não portados | **ausentes** (o próprio script anota que o mri_cc "doesn't work very well") |
 
-A espessura usa a definição do FreeSurfer (média dos dois sentidos entre white e pial),
-mas sobre malhas derivadas da segmentação — sem o posicionamento sub-voxel nem a correção
-de topologia do `mris_place_surface`; aproximação de triagem, declarada no relatório.
+Validação do motor: fantoma de esferas — descida ao nível zero com desvio máximo
+0,36 mm, espessura esférica 2,98/3,00 mm, χ=2 preservado, repulsão impede a pial de
+invadir a white, norm 110/40/0 exatos, Talairach recupera escala/translação sintéticas.
+
+**Instalando a rede SynthDist** (para o modo exato): copie
+`$FREESURFER_HOME/models/synthsurf_v10_230420.h5` de qualquer FreeSurfer ≥ 7.4, rode
+`python3 tools/convert_synthsurf_tfjs.py --h5 … --out models/synthsurf` e sirva a pasta
+junto do aplicativo — o passo 05 detecta e passa a usá-la (proveniência registra o motor).
+
+## Superfícies corticais (passo 05) — saídas
+
+Sobre um resultado com parcelação DKT, o passo 05 entrega: malhas **white/pial** por
+hemisfério (pial colorida pelas parcelas, visível no painel central pela chave
+"Mostrar 3D"), tabela estilo `aparc.stats` — **espessura média ± dp (Fischl–Dale, teto
+5 mm), área na white e volume por região DKT** —, **χ de Euler por hemisfério** como QC
+de topologia, o **norm sintético** (córtex super-resolvido derivado das SDFs) e o
+**`talairach.xfm`** (MNI por centros de massa) — tudo no inspetor, na linha do tempo e
+em todas as exportações. O mapa de fidelidade da seção anterior diz exatamente o que é
+reprodução do recon-all-clinical e o que é aproximação; o JSON/PDF registram o motor de
+SDF usado (rede SynthDist ou EDT) e o χ de Euler de cada execução.
 
 ## Comparação normativa (QC, não clínico)
 
@@ -205,9 +228,10 @@ os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clí
   `thick_*`/`surfarea_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
 - **PDF** — capa com captura e banner de QC, comparação normativa com réguas de percentil,
   lobos, estruturas, assimetria, superfície cortical e página de métodos
-- **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, máscara,
-  cérebro extraído) em `.nii.gz`
-- **Malhas** — white/pial em `.mz3` dentro do `.zip`
+- **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, MP-RAGE
+  sintético, máscara, cérebro extraído, **norm sintético**) em `.nii.gz`
+- **`talairach.xfm`** — transformada linear para o MNI (formato MNI Transform File)
+- **Malhas** — white/pial em `.mz3` dentro do `.zip` (com o xfm e o norm)
 - **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav`
 
 ### Usar no R
@@ -246,6 +270,7 @@ lib/synthseg-core.js                   pré/pós-processamento e tiles do SynthS
 lib/tfjs-upsampling3d.js               camadas 3D ausentes no tfjs
 lib/fastsurfer-core.js                 FastSurferCNN v1 (forward, vistas, LIA, agregação)
 lib/synthsr-core.js                    SynthSR: reamostragem RAS 1 mm + blocos de inferência
+lib/sdf-surface.js                     recon-clinical: SDFs, partição E/D, Eq. 5, Euler, Talairach
 lib/dkt-fusion.js                      fusão parcelação→córtex (esquema do predict_synthseg)
 lib/surfaces.js                        EDT, surface nets, Taubin, áreas, MZ3
 lib/normative.js                       percentil/z contra os brain charts
@@ -257,7 +282,8 @@ workers/mask.worker.js                 limpeza da máscara cerebral (BET-like)
 workers/synthseg.worker.js             inferência SynthSeg em blocos
 workers/synthsr.worker.js              síntese SynthSR (MP-RAGE 1 mm)
 workers/fastsurfer.worker.js           parcelação FastSurferCNN por vistas
-workers/surface.worker.js              superfícies e espessura Fischl–Dale
+workers/reconsurf.worker.js            superfícies recon-all-clinical (SDF + Eq. 5)
+workers/surface.worker.js              motor anterior (surface nets puro; substituído)
 brainchop/                             worker de inferência do brain2print (MIT)
 models/synthseg1/                      SynthSeg 1.0 em tfjs f16 (27 MB) + rótulos
 models/synthsr/                        SynthSR v1.0 em tfjs f16 (26 MB) + fixture de paridade
@@ -266,6 +292,7 @@ models/normative/brainchart.json       curvas normativas vendorizadas
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
 tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
+tools/convert_synthsurf_tfjs.py        conversor SynthDist (traga-seus-pesos do FreeSurfer)
 tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, sem torch)
 licenses/                              licenças e proveniência dos pesos
 vendor/                                NiiVue, dcm2niix WASM, TensorFlow.js, fontes
@@ -336,6 +363,13 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
   (Science Advances, 2023) e, para o fluxo completo, *"Recon-all-clinical": Cortical
   surface reconstruction and analysis of heterogeneous clinical brain MRI* (Gopinath et
   al., Medical Image Analysis, 2025).
+- **recon-all-clinical / SynthDist** — Gopinath, Greve, Magdamo, Arnold, Das, Puonti,
+  Iglesias ([freesurfer/freesurfer](https://github.com/freesurfer/freesurfer) →
+  `recon_all_clinical/`): fluxo e fórmulas reimplementados do código-fonte; os pesos do
+  SynthDist seguem a licença do FreeSurfer e NÃO são redistribuídos
+  (`licenses/synthsurf.txt`). Cite *"Recon-all-clinical": Cortical surface
+  reconstruction and analysis of heterogeneous clinical brain MRI* (Medical Image
+  Analysis, 2025).
 - **FastSurfer** — Henschel, Conjeti, Estrada, Diers, Fischl, Reuter
   ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0): checkpoints
   oficiais do FastSurferCNN v1 convertidos para tfjs (`licenses/fastsurfer.txt`). Cite

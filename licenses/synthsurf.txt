@@ -1,0 +1,36 @@
+SynthDist / mri_synth_surf — rede de SDFs do recon-all-clinical
+
+Rede: Karthik Gopinath, Juan Eugenio Iglesias e colaboradores, Athinoula A.
+Martinos Center (MGH/Harvard) — distribuída como parte do FreeSurfer
+(https://github.com/freesurfer/freesurfer, diretório recon_all_clinical/;
+pesos: $FREESURFER_HOME/models/synthsurf_v10_230420.h5).
+
+OS PESOS NÃO SÃO REDISTRIBUÍDOS COM O SEGMENTARM. O FreeSurfer é distribuído
+sob a FreeSurfer Software License Agreement (uso livre em pesquisa, com
+registro; sem redistribuição). Para usar a rede no SegmentaRM:
+
+  1. Instale o FreeSurfer >= 7.4 (ou copie de uma instalação existente) e
+     localize $FREESURFER_HOME/models/synthsurf_v10_230420.h5
+     (159.148.696 bytes; sha256
+     f02f70dacb753c019ea590f5ca36617dc8ace32eb571c74ffc648c926ad7bbbc).
+  2. Converta: python3 tools/convert_synthsurf_tfjs.py \
+         --h5 caminho/para/synthsurf_v10_230420.h5 --out models/synthsurf
+  3. Sirva a pasta models/synthsurf/ junto do aplicativo. O passo 05 detecta o
+     model.json e passa a usar a rede; sem ela, o passo usa o fallback
+     declarado (SDF por transformada de distância exata das máscaras).
+
+Citações:
+  Gopinath K, Greve DN, Magdamo C, Arnold S, Das S, Puonti O, Iglesias JE.
+  "Recon-all-clinical": Cortical surface reconstruction and analysis of
+  heterogeneous clinical brain MRI. Medical Image Analysis 103 (2025) 103608.
+  https://doi.org/10.1016/j.media.2025.103608
+
+  Gopinath K, Greve DN, Das S, Arnold S, Magdamo C, Iglesias JE. Cortical
+  analysis of heterogeneous clinical brain MRI scans for large-scale
+  neuroimaging studies. MICCAI 2023.
+
+O restante do fluxo (partição hemisférica por EDT, imagem sintética norm,
+wm.seg/filled, Talairach por centros de massa, energia de colocação de
+superfícies) foi reimplementado em JavaScript a partir do código-fonte
+público do FreeSurfer (recon-all-clinical.sh e mri_synth_surf.py) e do artigo,
+sem copiar código C do FreeSurfer.
