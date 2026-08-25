@@ -73,6 +73,176 @@ function progress (frac) {
   $('progress').style.width = Math.max(0, Math.min(100, frac * 100)) + '%'
 }
 
+// ---------- log de erros exportável + tutorial em pop-up ----------
+// cada erro de etapa vira um registro com contexto completo (entrada, seleções,
+// diagnóstico do worker, últimas linhas do console) — persistido em localStorage
+// (últimos 20) e exportável em .txt para diagnóstico e reprocessamento
+const ERRLOG_KEY = 'segmentarm-errlog'
+const errorLog = (() => {
+  try { const a = JSON.parse(localStorage.getItem(ERRLOG_KEY) || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
+})()
+
+function gpuName () {
+  try {
+    const gl = state.nv && state.nv.gl
+    const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info')
+    return dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : null
+  } catch { return null }
+}
+
+function errorContext () {
+  const val = (id) => { const el = document.getElementById(id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : null }
+  let ctx = { versao: VERSION, navegador: navigator.userAgent }
+  try {
+    ctx = {
+      versao: VERSION,
+      navegador: navigator.userAgent,
+      gpu: gpuName(),
+      memoriaJS_MB: (performance.memory && Math.round(performance.memory.usedJSHeapSize / 1048576)) || null,
+      entrada: state.inputDesc || null,
+      qualidade: state.quality ? { nivel: state.quality.grade, achados: (state.quality.findings || []).map(f => f.txt) } : null,
+      pipeline: state.pipelineUsed || null,
+      modelo: state.modelUsed || null,
+      segKind: state.segKind || null,
+      dimsBruto: state.rawVol ? [state.rawVol.hdr.dims[1], state.rawVol.hdr.dims[2], state.rawVol.hdr.dims[3]] : null,
+      dimsConformado: state.conformed ? dimsOf(state.conformed) : null,
+      selecoes: {
+        pipeline: val('pipeline'), modelo: val('model'), execucao: val('backend'), memoria: val('mem'),
+        fonteDkt: val('parc-source'), betF: val('bet-f'),
+        reorient: val('opt-reorient'), recorte: val('opt-crop'), vies: val('opt-bias'), suavizacao: val('opt-smooth'),
+        bet: val('opt-bet'), normalizacao: val('opt-norm'), synthsr: val('opt-synthsr'), synthsrFlip: val('opt-synthsr-flip')
+      },
+      ultimasLinhasConsole: Array.from(consoleEl.querySelectorAll('p')).slice(-15).map(p => p.textContent)
+    }
+  } catch { /* contexto parcial já é útil */ }
+  return ctx
+}
+
+function recordError (etapa, err, diagnostico = null) {
+  const entry = {
+    quando: new Date().toISOString(),
+    etapa,
+    mensagem: err && err.message ? err.message : String(err),
+    stack: err && err.stack ? String(err.stack).split('\n').slice(0, 10).join('\n') : null,
+    diagnostico: diagnostico || null,
+    contexto: errorContext()
+  }
+  errorLog.push(entry)
+  while (errorLog.length > 20) errorLog.shift()
+  try { localStorage.setItem(ERRLOG_KEY, JSON.stringify(errorLog)) } catch { /* armazenamento cheio/indisponível */ }
+  const btn = document.querySelector('[data-export="errlog"]')
+  if (btn) btn.disabled = false
+  return entry
+}
+
+function errorLogText () {
+  const L = []
+  L.push('SegmentaRM — log de erros (para diagnóstico e reprocessamento)')
+  L.push(`Gerado em ${new Date().toISOString()} · versão ${VERSION} · ${errorLog.length} registro(s)`)
+  L.push('Anexe este arquivo ao reportar o problema (issue no GitHub ou ao desenvolvedor).')
+  L.push('='.repeat(72))
+  for (const e of errorLog) {
+    L.push('')
+    L.push(`[${e.quando}] etapa: ${e.etapa}`)
+    L.push(`mensagem: ${e.mensagem}`)
+    if (e.diagnostico) L.push('diagnóstico: ' + JSON.stringify(e.diagnostico))
+    const c = e.contexto || {}
+    L.push(`entrada: ${c.entrada || '—'} · qualidade: ${c.qualidade ? c.qualidade.nivel : '—'} · pipeline: ${c.pipeline || '—'}`)
+    L.push(`modelo: ${c.modelo || '—'} · segKind: ${c.segKind || '—'} · dims: ${(c.dimsConformado || c.dimsBruto || []).join('×') || '—'}`)
+    if (c.selecoes) L.push('seleções: ' + JSON.stringify(c.selecoes))
+    L.push(`navegador: ${c.navegador || '—'}${c.gpu ? ' · gpu: ' + c.gpu : ''}`)
+    if (c.ultimasLinhasConsole && c.ultimasLinhasConsole.length) {
+      L.push('últimas linhas do console:')
+      for (const ln of c.ultimasLinhasConsole) L.push('  | ' + ln)
+    }
+    if (e.stack) L.push('stack:\n' + e.stack)
+    L.push('-'.repeat(72))
+  }
+  L.push('')
+  L.push('JSON completo (para análise automática):')
+  L.push(JSON.stringify(errorLog, null, 2))
+  return L.join('\n')
+}
+
+function exportErrorLog () {
+  if (!errorLog.length) { log('Nenhum erro registrado neste navegador.', 'ok'); return }
+  const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
+  saveBlob(errorLogText(), `segmentarm_log_erros_${ts}.txt`, 'text/plain;charset=utf-8')
+  log(`Log de erros exportado (${errorLog.length} registro(s)).`, 'ok')
+}
+
+// tutoriais por tipo de erro — o último é o genérico
+const ERROR_GUIDES = [
+  {
+    match: /córtex parcelado|córtex sem parcela|córtex classificável|rode o passo (04|DKT)/i,
+    titulo: 'As superfícies precisam da parcelação DKT',
+    porque: 'O passo 05 reconstrói as superfícies a partir dos rótulos de córtex parcelado ' +
+      '(ctx-lh-*/ctx-rh-*) que o passo 04 grava na fita cortical. A segmentação atual não tem ' +
+      'essas parcelas em um ou nos dois hemisférios — em geral porque o passo 04 não chegou a ' +
+      'parcelar (rede sem memória na GPU, entrada fora do domínio T1, resultado descartado) ou ' +
+      'porque a segmentação (passo 03) foi refeita depois do DKT, o que apaga as parcelas. ' +
+      'Nada foi perdido: o resultado anterior permanece intacto.',
+    passos: [
+      'Confira no visualizador se o overlay mostra as parcelas coloridas do DKT nos DOIS hemisférios (isso indica que o passo 04 concluiu).',
+      'Re-rode o passo 04 · Parcelação DKT. Se falhar ou parcelar só um lado, troque a fonte (FastSurfer 3 vistas ↔ axial+coronal ↔ rede brainchop) ou mude Execução para CPU / Memória para Baixa.',
+      'Entrada de baixa qualidade ou não-T1 (régua C/D)? Reprocesse desde o passo 03 com "MP-RAGE sintético 1 mm (SynthSR)" marcado no passo 02.',
+      'Com o DKT refeito, rode o passo 05 · Superfícies de novo. Se só um hemisfério tiver parcelas, o passo agora prossegue com esse lado e avisa no console.',
+      'Se o problema persistir, baixe o log de erro abaixo e anexe ao reportar — ele registra o contexto completo para diagnóstico.'
+    ]
+  },
+  {
+    match: /memory|memória|texture|alloc|framebuffer|context lost|contexto/i,
+    titulo: 'Memória de GPU ou do navegador insuficiente',
+    porque: 'A inferência não coube na memória da GPU (WebGL) ou do navegador. É comum em GPUs ' +
+      'integradas, notebooks e abas com muitos volumes abertos. Nada foi perdido: o resultado da ' +
+      'etapa anterior permanece intacto.',
+    passos: [
+      'Troque "Memória" para Baixa (blocos menores) e rode a etapa de novo.',
+      'Se repetir, troque "Execução" para CPU — mais lento, porém estável.',
+      'Feche outras abas e aplicativos pesados; em estudos DICOM grandes, abra só a série necessária na triagem.',
+      'Se o visualizador ficar branco, ele se recupera sozinho; aguarde ou recarregue a página (o cache offline preserva os modelos).',
+      'Persistindo, baixe o log de erro abaixo e anexe ao reportar.'
+    ]
+  },
+  {
+    match: null,
+    titulo: 'Algo falhou nesta etapa',
+    porque: 'Ocorreu um erro inesperado. Nada foi perdido: o resultado da etapa anterior permanece ' +
+      'intacto e você pode rodar a etapa novamente.',
+    passos: [
+      'Rode a etapa novamente — falhas transitórias (memória, GPU ocupada) costumam sumir.',
+      'Se repetir, troque "Execução" para CPU ou "Memória" para Baixa.',
+      'Confira a régua de qualidade (passo 02): entrada não-T1 ou muito anisotrópica degrada todas as redes — considere o SynthSR.',
+      'Baixe o log de erro abaixo — ele registra o contexto completo (entrada, seleções, mensagens) para diagnóstico e para reprocessar depois.'
+    ]
+  }
+]
+
+function showErrorDialog (etapa, err) {
+  const dlg = $('dlg-error')
+  if (!dlg) return
+  const msg = err && err.message ? err.message : String(err)
+  const g = ERROR_GUIDES.find(x => x.match && x.match.test(msg)) || ERROR_GUIDES[ERROR_GUIDES.length - 1]
+  $('err-title').textContent = g.titulo
+  $('err-stage').textContent = etapa
+  $('err-msg').textContent = msg
+  $('err-why').textContent = g.porque
+  const ol = $('err-steps')
+  ol.innerHTML = ''
+  for (const p of g.passos) {
+    const li = document.createElement('li')
+    li.textContent = p
+    ol.appendChild(li)
+  }
+  try { if (!dlg.open) dlg.showModal() } catch { /* dialog indisponível */ }
+}
+
+// registra e explica um erro de etapa num só lugar
+function stepError (etapa, err, diagnostico = null) {
+  recordError(etapa, err, diagnostico)
+  showErrorDialog(etapa, err)
+}
+
 // ---------- visualizador ----------
 async function initViewer () {
   const nv = new Niivue({
@@ -821,6 +991,19 @@ async function runDktStep () {
     state.segKind = prevKind + '-dkt'
     state.modelUsed = `${src.pt} + parcelação DKT ${parcName === 'rede DKT brainchop' ? '(rede brainchop)' : `(${parcName})`}`
     log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
+    // diagnóstico precoce para o passo 05: parcelas por hemisfério na fusão
+    {
+      const fu = src.fuse
+      let lhP = 0, rhP = 0
+      for (let v = 0; v < fused.seg.length; v++) {
+        const s2 = fused.seg[v]
+        if (s2 >= fu.lhBase && s2 < fu.lhBase + 34) lhP++
+        else if (s2 >= fu.rhBase && s2 < fu.rhBase + 34) rhP++
+      }
+      if (!lhP || !rhP) {
+        log(`Atenção: a fusão não deixou parcelas DKT no hemisfério ${!lhP && !rhP ? 'esquerdo NEM no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto. Re-rode o DKT com outra fonte (FastSurfer 3 vistas / axial+coronal / brainchop), em CPU ou memória baixa.`, 'err')
+      }
+    }
     state.surf = null
     await showSurfaces(false)
     $('run-surf').disabled = false
@@ -830,6 +1013,7 @@ async function runDktStep () {
     await applySegmentationResult(src.labels, src.colormap)
   } catch (e) {
     log(`Erro no passo DKT — o resultado ${src.pt} permanece intacto: ` + e.message, 'err')
+    stepError('04 · Parcelação DKT', e)
     progress(0)
     $('run-dkt').disabled = false
   } finally {
@@ -843,8 +1027,35 @@ async function runDktStep () {
 async function runSurfStep () {
   if (state.running) return
   if (!state.seg || !/-dkt$/.test(state.segKind)) {
+    const e = new Error('as superfícies partem de um resultado com parcelação DKT — rode o passo 04 antes')
     log('As superfícies partem de um resultado com parcelação DKT — rode o passo 04 antes.', 'err')
+    stepError('05 · Superfícies (pré-checagem)', e, { segKind: state.segKind || null })
     return
+  }
+  // pré-checagem com diagnóstico: conta voxels de córtex parcelado por hemisfério
+  // antes de gastar tempo no worker — e explica o que fazer se não houver parcela
+  if (state.labelsMap) {
+    const side = new Uint8Array(256)
+    for (const [i, nm] of Object.entries(state.labelsMap)) {
+      if (/^ctx-lh-/.test(nm)) side[+i] = 1
+      else if (/^ctx-rh-/.test(nm)) side[+i] = 2
+    }
+    let lh = 0, rh = 0
+    for (let v = 0; v < state.seg.length; v++) {
+      const s = side[state.seg[v]]
+      if (s === 1) lh++
+      else if (s === 2) rh++
+    }
+    if (!lh && !rh) {
+      const e = new Error('nenhum voxel de córtex parcelado (ctx-lh-*/ctx-rh-*) na segmentação atual — re-rode o passo 04 (DKT) antes das superfícies')
+      log('Erro nas superfícies — o resultado atual permanece intacto: ' + e.message, 'err')
+      stepError('05 · Superfícies (pré-checagem)', e, { cortexParceladoE_vox: lh, cortexParceladoD_vox: rh, segKind: state.segKind })
+      progress(0)
+      return
+    }
+    if (!lh || !rh) {
+      log(`Aviso: córtex parcelado só no hemisfério ${lh ? 'esquerdo' : 'direito'} — as superfícies prosseguem só com esse lado; re-rode o passo 04 para recuperar o outro.`, 'err')
+    }
   }
   state.running = true
   $('run-surf').disabled = true
@@ -857,7 +1068,7 @@ async function runSurfStep () {
         const m = ev.data
         if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.1 + m.frac * 0.85) }
         else if (m.cmd === 'done') { w.terminate(); resolve(m) }
-        else if (m.cmd === 'error') { w.terminate(); reject(new Error(m.message)) }
+        else if (m.cmd === 'error') { w.terminate(); const err = new Error(m.message); err.diag = m.diag || null; reject(err) }
       }
       w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'falha no worker de superfícies')) }
       w.postMessage({
@@ -869,6 +1080,7 @@ async function runSurfStep () {
         voxVol: voxVolOf(state.conformed)
       })
     })
+    if (r.aviso) log('Aviso: ' + r.aviso, 'err')
     for (const reg of r.stats) reg.pt = ptNameOf(reg.name)
     state.surf = { meshes: r.meshes, stats: r.stats }
     renderSurfStats()
@@ -880,6 +1092,7 @@ async function runSurfStep () {
     progress(0)
   } catch (e) {
     log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
+    stepError('05 · Superfícies', e, e.diag || null)
     progress(0)
   } finally {
     state.running = false
@@ -1029,6 +1242,7 @@ async function runSegmentation () {
     if (/memory|memória|texture|alloc/i.test(String(e.message))) {
       log('Sugestão: troque "Memória" para Baixa, ou a execução para CPU.', 'err')
     }
+    stepError('03 · Segmentação', e)
     progress(0)
   } finally {
     state.running = false
@@ -1284,7 +1498,7 @@ async function makeExports () {
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -1361,6 +1575,7 @@ async function handleExport (kind) {
         break
       }
       case 'cohort-clear': state.cohort = []; persistCohort(); renderCohort(); break
+      case 'errlog': exportErrorLog(); break
     }
   } catch (e) {
     log('Erro na exportação: ' + e.message, 'err')
@@ -1474,6 +1689,19 @@ function wireInputs () {
   $('sex').onchange = updateNorms
   document.querySelectorAll('[data-export]').forEach(btn => {
     btn.onclick = () => handleExport(btn.dataset.export)
+  })
+
+  // diálogo de erro (tutorial) + log exportável
+  $('err-download').onclick = exportErrorLog
+  $('err-close').onclick = () => $('dlg-error').close()
+  const errBtn = document.querySelector('[data-export="errlog"]')
+  if (errBtn) errBtn.disabled = !errorLog.length
+  // erros fora das etapas também entram no log (sem pop-up — podem ser benignos)
+  window.addEventListener('error', (ev) => {
+    try { recordError('global', ev.error || new Error(String(ev.message || 'erro de script'))) } catch { /* nunca propaga */ }
+  })
+  window.addEventListener('unhandledrejection', (ev) => {
+    try { recordError('promise', ev.reason instanceof Error ? ev.reason : new Error(String(ev.reason))) } catch { /* nunca propaga */ }
   })
 }
 

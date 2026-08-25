@@ -34,6 +34,7 @@ function classify (labels) {
 }
 
 self.onmessage = async (ev) => {
+  let diag = null // diagnóstico anexado a qualquer erro (para o log exportável do app)
   try {
     const { seg, dims, affine, labels, colormap, voxVol = 1 } = ev.data
     const [nx, ny, nz] = dims
@@ -43,20 +44,49 @@ self.onmessage = async (ev) => {
     post(0.03, 'Separando hemisférios e montando as máscaras white/pial…')
     // hemisfério de rótulos bilaterais (aseg compacta): lado da linha média em x-mundo,
     // com a linha média estimada pelo centro dos córtex E/D parcelados
-    let lxs = 0, lxn = 0, rxs = 0, rxn = 0
+    let lxs = 0, lxn = 0, rxs = 0, rxn = 0, ctx0n = 0, wmn = 0, alls = 0, alln = 0
     const xw = (v) => {
       const x = v % nx, y = ((v / nx) | 0) % ny, z = (v / (nx * ny)) | 0
       return affine[0] * x + affine[1] * y + affine[2] * z + affine[3]
     }
     for (let v = 0; v < n; v++) {
       const c = cls[seg[v]]
-      if (!c || c.kind !== 'ctx') continue
+      if (!c) continue
+      alls += xw(v); alln++
+      if (c.kind === 'ctx0') ctx0n++
+      else if (c.kind === 'wm') wmn++
+      if (c.kind !== 'ctx') continue
       if (c.hemi === 1) { lxs += xw(v); lxn++ } else if (c.hemi === 2) { rxs += xw(v); rxn++ }
     }
-    if (!lxn || !rxn) throw new Error('sem córtex parcelado nos dois hemisférios — rode o passo DKT antes')
-    const lx = lxs / lxn, rx = rxs / rxn
-    const midX = (lx + rx) / 2
-    const leftIsPositive = lx > rx
+    diag = {
+      cortexParceladoE_vox: lxn,
+      cortexParceladoD_vox: rxn,
+      cortexSemParcela_vox: ctx0n,
+      substanciaBranca_vox: wmn,
+      rotulosClassificaveis: Object.keys(cls).length
+    }
+    if (!lxn && !rxn) {
+      throw new Error('nenhum voxel de córtex parcelado (ctx-lh-*/ctx-rh-*) na segmentação atual' +
+        (ctx0n
+          ? ` — há ${ctx0n.toLocaleString('pt-BR')} voxels de córtex SEM parcela, sinal de que o passo 04 (DKT) não parcelou ou de que a segmentação foi refeita depois dele; re-rode o passo 04`
+          : ' — a segmentação atual não tem córtex classificável; refaça os passos 03 (segmentação) e 04 (DKT)'))
+    }
+    // com parcela num único hemisfério, prossegue só com ele (aviso) em vez de bloquear:
+    // a linha média cai para o centro x de todo o tecido classificado
+    let midX, leftIsPositive, aviso = null
+    if (lxn && rxn) {
+      const lx = lxs / lxn, rx = rxs / rxn
+      midX = (lx + rx) / 2
+      leftIsPositive = lx > rx
+    } else {
+      const okPt = lxn ? 'esquerdo' : 'direito'
+      const faltaPt = lxn ? 'direito' : 'esquerdo'
+      aviso = `córtex parcelado só no hemisfério ${okPt} — malhas dos dois lados, mas espessura/área/volume só do ${okPt}; re-rode o passo 04 (outra fonte, CPU ou memória baixa) para recuperar o ${faltaPt}`
+      post(0.05, 'AVISO: ' + aviso)
+      midX = alln ? alls / alln : 0
+      const ax = (lxn ? lxs : rxs) / (lxn || rxn)
+      leftIsPositive = lxn ? ax > midX : !(ax > midX)
+    }
 
     const white = [new Uint8Array(n), new Uint8Array(n)] // [E, D]
     const pial = [new Uint8Array(n), new Uint8Array(n)]
@@ -233,8 +263,8 @@ self.onmessage = async (ev) => {
     }
     stats.sort((a, b) => a.base === b.base ? a.hemi.localeCompare(b.hemi) : a.base.localeCompare(b.base))
     post(0.98, `Superfícies prontas: ${meshes.length} malhas, ${stats.length} regiões.`)
-    self.postMessage({ cmd: 'done', meshes, stats }, meshes.map(m => m.mz3))
+    self.postMessage({ cmd: 'done', meshes, stats, aviso }, meshes.map(m => m.mz3))
   } catch (e) {
-    self.postMessage({ cmd: 'error', message: e && e.message ? e.message : String(e) })
+    self.postMessage({ cmd: 'error', message: e && e.message ? e.message : String(e), diag })
   }
 }

@@ -203,6 +203,19 @@ input::placeholder { color: var(--faint); }
 @media (prefers-reduced-transparency: reduce) {
   .series-dlg::backdrop { background: rgba(4, 5, 7, 0.88); backdrop-filter: none; }
 }
+
+/* ---------- diálogo de erro (tutorial + log exportável) ---------- */
+.err-dlg { width: min(520px, 92vw); border-color: rgba(224, 101, 90, 0.45); }
+.err-dlg .err-stage { font: 11px/1.4 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.err-dlg .err-msg {
+  font: 12px/1.55 var(--mono); color: #E8998F; word-break: break-word;
+  background: rgba(224, 101, 90, 0.08); border-left: 2px solid rgba(224, 101, 90, 0.55);
+  padding: 8px 10px; border-radius: 0 8px 8px 0; margin-bottom: 12px;
+}
+.err-dlg .note { margin-bottom: 10px; }
+.err-dlg .err-what { font: 600 12.5px/1.3 var(--display); margin-bottom: 6px; }
+.err-dlg .err-steps { margin: 0 0 4px 18px; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+.err-dlg .err-steps li::marker { color: var(--dim); font: 600 11px var(--mono); }
 .hud-sel { width: auto; background: rgba(20, 22, 28, 0.6); border-color: var(--line); backdrop-filter: blur(8px); }
 
 .dropwrap {

@@ -280,7 +280,17 @@ rail esquerdo com os passos 01–05, **visualizador no centro** com HUD (janelam
 automático por percentis + botão **"janela"** para ajuste manual por arrasto — ↔
 contraste, ↕ brilho, duplo clique volta ao automático), inspetor à direita e log no
 rodapé. O visualizador **se recupera sozinho de perda de contexto WebGL** (comum após
-inferência pesada na GPU — era a causa da tela branca). Tema escuro grafite/osso/
+inferência pesada na GPU — era a causa da tela branca).
+
+**Quando uma etapa falha**, um pop-up explica em português o que aconteceu e o que fazer
+(ex.: superfícies sem parcelação DKT → re-rodar o passo 04, trocar a fonte ou usar
+CPU/memória baixa), e cada erro vira um registro num **log exportável (.txt)** — com
+entrada, seleções, diagnóstico do worker (voxels parcelados por hemisfério etc.) e as
+últimas linhas do console — persistido no navegador (últimos 20) e acessível pelo botão
+do pop-up ou por **Exportar → Log de erros**. O passo de superfícies também deixou de
+bloquear com parcela em um único hemisfério: prossegue com o lado disponível e avisa.
+
+Tema escuro grafite/osso/
 vermelho-córtex com princípios das HIG da Apple e equivalentes para
 `prefers-reduced-motion`, `prefers-reduced-transparency` e `prefers-contrast: more`.
 
