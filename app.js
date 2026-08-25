@@ -15,6 +15,7 @@ import { buildReport } from './lib/report.js'
 import { makeZip } from './lib/zip.js'
 import { fuseDKT } from './lib/dkt-fusion.js'
 import { loadNorms, compareToNorms } from './lib/normative.js'
+import { scanDicomSeries, directSeriesToNifti } from './lib/dicom-scan.js'
 
 const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
@@ -262,6 +263,113 @@ function deviceBadge () {
 }
 
 // ---------- entrada ----------
+// acima deste tamanho o estudo mostra a triagem mesmo com uma série só;
+// abrir menos séries de uma vez mantém o pico de memória no tamanho de UMA série
+const PICKER_MIN_FILES = 200
+
+/** Diálogo de triagem: escolher séries e o modo de abertura (estilo LUME). */
+function showSeriesPicker (groups, totalFiles) {
+  return new Promise((resolve) => {
+    const dlg = $('dlg-series')
+    const totalMB = groups.reduce((s, g) => s + g.bytes, 0) / 1048576
+    const big = totalFiles > 800 || totalMB > 800
+    $('series-info').textContent =
+      `${groups.length} série(s) · ${totalFiles} arquivo(s) · ${totalMB.toFixed(0)} MB. ` +
+      `Abrir menos séries de uma vez poupa memória${big ? ' — estudo grande: selecione só o necessário.' : '.'}`
+    const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))
+    $('series-list').innerHTML = groups.map((g, i) => `
+      <li><label><input type="checkbox" data-g="${i}" ${big ? '' : 'checked'}>
+        <span class="pick-desc"><strong>${esc(g.desc)}</strong>
+        <span class="pick-meta">${esc(g.sidecar.Modality || '?')} · ${g.count} img · ${(g.bytes / 1048576).toFixed(1)} MB${g.supportedDirect ? '' : ' · só conversão'}</span></span>
+      </label></li>`).join('')
+    let settled = false
+    const done = (value) => {
+      if (settled) return
+      settled = true
+      if (dlg.open) dlg.close()
+      resolve(value)
+    }
+    $('series-all').onclick = () => dlg.querySelectorAll('input[data-g]').forEach(c => { c.checked = true })
+    $('series-none').onclick = () => dlg.querySelectorAll('input[data-g]').forEach(c => { c.checked = false })
+    $('series-cancel').onclick = () => done(null)
+    dlg.oncancel = () => done(null)
+    $('series-open').onclick = () => {
+      const selected = [...dlg.querySelectorAll('input[data-g]:checked')].map(c => groups[+c.dataset.g])
+      if (!selected.length) { log('Selecione ao menos uma série.', 'err'); return }
+      done({ selected, direct: $('series-direct').checked })
+    }
+    dlg.showModal()
+  })
+}
+
+/**
+ * Entrada DICOM com triagem por série: lê só os cabeçalhos (≈128 KB/arquivo),
+ * agrupa por SeriesInstanceUID e converte UMA série por vez — o pico de memória
+ * é o de uma série, não o do estudo inteiro (evita ArrayBuffer allocation failed
+ * em estudos com milhares de arquivos).
+ */
+async function handleDicomInput (allFiles) {
+  log(`Lendo cabeçalhos de ${allFiles.length} arquivo(s) DICOM (triagem por série)…`)
+  progress(0.03)
+  let groups = []
+  try {
+    groups = await scanDicomSeries(allFiles, (k, n) => { progress(0.03 + 0.1 * k / n) })
+  } catch (e) { log('Triagem falhou (' + e.message + ') — seguindo com a conversão em bloco.', 'err') }
+  if (!groups.length) {
+    const { file, sidecar } = await convertDicom(allFiles)
+    await loadVolumeFile(file, sidecar, `DICOM → ${file.name}`)
+    return
+  }
+  log(`${groups.length} série(s) encontrada(s).`, 'ok')
+  let plan
+  if (groups.length === 1 && allFiles.length <= PICKER_MIN_FILES) {
+    plan = { selected: groups, direct: true } // estudo pequeno de uma série: abre sem perguntar
+  } else {
+    plan = await showSeriesPicker(groups, allFiles.length)
+  }
+  if (!plan || !plan.selected.length) { progress(0); log('Abertura cancelada.'); return }
+
+  const entries = []
+  for (let i = 0; i < plan.selected.length; i++) {
+    const g = plan.selected[i]
+    progress(0.15 + 0.75 * (i / plan.selected.length))
+    try {
+      if (plan.direct && g.supportedDirect) {
+        log(`Série "${g.desc}": leitura direta (${g.count} cortes, ${(g.bytes / 1048576).toFixed(0)} MB)…`)
+        const { file, sidecar } = await directSeriesToNifti(g, (k, n) =>
+          progress(0.15 + 0.75 * ((i + k / n) / plan.selected.length)))
+        entries.push({ file, sidecar })
+      } else {
+        log(`Série "${g.desc}": convertendo com dcm2niix (${g.count} arquivos)…`)
+        entries.push(await convertDicom(g.files))
+      }
+    } catch (err) {
+      log(`Série "${g.desc}" falhou: ${err.message} — seguindo para a próxima.`, 'err')
+    }
+  }
+  if (!entries.length) throw new Error('nenhuma série selecionada pôde ser aberta')
+
+  // popula o seletor de séries; a maior costuma ser a volumétrica
+  const sel = $('series')
+  sel.innerHTML = ''
+  entries.forEach((en, i) => {
+    const opt = document.createElement('option')
+    opt.value = i
+    opt.textContent = (en.sidecar && (en.sidecar.SeriesDescription || en.sidecar.ProtocolName)) || en.file.name
+    sel.appendChild(opt)
+  })
+  $('series-field').hidden = entries.length < 2
+  let best = 0
+  for (let i = 1; i < entries.length; i++) if (entries[i].file.size > entries[best].file.size) best = i
+  sel.value = String(best)
+  sel.onchange = async () => {
+    const en = entries[+sel.value]
+    await loadVolumeFile(en.file, en.sidecar, `DICOM → ${en.file.name}`)
+  }
+  const en = entries[best]
+  await loadVolumeFile(en.file, en.sidecar, `DICOM → ${en.file.name}`)
+}
+
 async function convertDicom (files) {
   log(`Convertendo ${files.length} arquivos DICOM com dcm2niix (WASM)…`)
   progress(0.05)
@@ -1111,8 +1219,7 @@ function wireInputs () {
   $('file-dicom').onchange = async (e) => {
     if (!e.target.files.length) return
     try {
-      const { file, sidecar } = await convertDicom(Array.from(e.target.files))
-      await loadVolumeFile(file, sidecar, `DICOM → ${file.name}`)
+      await handleDicomInput(Array.from(e.target.files))
     } catch (err) { log('Erro na conversão DICOM: ' + err.message, 'err'); progress(0) }
   }
   ;['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over') }))
@@ -1145,8 +1252,7 @@ function wireInputs () {
       if (files.length === 1 && niiFile) {
         await loadVolumeFile(niiFile, null, `NIfTI ${niiFile.name}`)
       } else {
-        const { file, sidecar } = await convertDicom(files)
-        await loadVolumeFile(file, sidecar, `DICOM → ${file.name}`)
+        await handleDicomInput(files)
       }
     } catch (err) { log('Erro na entrada: ' + err.message, 'err'); progress(0) }
   })
