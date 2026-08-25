@@ -1,11 +1,12 @@
 # SegmentaRM
 
 PWA de **segmentação e morfometria cerebral 100% no navegador** — nenhuma imagem sai do
-dispositivo, nenhum servidor, nenhuma instalação. Converte **DICOM**, segmenta com a rede
-**SynthSeg original** ou com os modelos MeshNet do brainchop, aplica a **parcelação DKT da
-FastSurferCNN**, reconstrói **superfícies corticais** com espessura/área por região, compara
-os volumes com as **curvas normativas dos brain charts** por idade e sexo, e exporta tudo em
-**CSV, JSON, SPSS (.sav), PDF, NIfTI, malhas .mz3 e pacote .zip**.
+dispositivo, nenhum servidor, nenhuma instalação. Converte **DICOM**, sintetiza um
+**MP-RAGE T1 1 mm com a rede SynthSR original** (estilo `recon-all-clinical`), segmenta com
+a rede **SynthSeg original** ou com os modelos MeshNet do brainchop, aplica a **parcelação
+DKT da FastSurferCNN**, reconstrói **superfícies corticais** com espessura (Fischl–Dale) e
+área por região, compara os volumes com as **curvas normativas dos brain charts** por idade
+e sexo, e exporta tudo em **CSV, JSON, SPSS (.sav), PDF, NIfTI, malhas .mz3 e pacote .zip**.
 
 > **Uso em pesquisa e ensino.** Não é dispositivo médico, não tem registro ANVISA e não
 > substitui leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
@@ -24,6 +25,9 @@ Arquivo .nii/.nii.gz ───────────────────�
                      reorientação RAS · recorte de pescoço · correção de viés ·
                      extração cerebral (BET-like, f ajustável) · normalização
                      (nível C/D aciona também o ramo robusto: reamostragem cúbica)
+                                        ▼
+                     [opcional] SynthSR — MP-RAGE T1 1 mm sintético (rede original,
+                     estilo recon-all-clinical; qualquer contraste/resolução)
                                         ▼
                      Conformação 256³ · 1 mm (estilo FreeSurfer, via NiiVue)
                                         ▼
@@ -106,12 +110,37 @@ de posteriors. Duas camadas ausentes no tfjs foram implementadas em
 Todos com variantes de memória normal/baixa. A primeira execução baixa os pesos; o
 service worker guarda tudo e o aplicativo funciona **offline** depois disso.
 
-### O modo robusto não é o SynthSR
+### SynthSR de verdade — MP-RAGE T1 1 mm sintético (estilo recon-all-clinical)
+
+A caixa **"MP-RAGE sintético 1 mm (SynthSR)"** no passo 02 roda a rede **SynthSR v1.0
+original** ([BBillot/SynthSR](https://github.com/BBillot/SynthSR), Apache 2.0; Iglesias
+et al., *Science Advances* 2023): os pesos oficiais `SynthSR_v10_210712.h5` convertidos
+para tfjs float16 (26 MB, `tools/convert_synthsr_tfjs.py`; paridade numérica com o Keras
+máx |Δ| = 0,004 em 128). É a peça central do `recon-all-clinical` (Gopinath et al.,
+*Medical Image Analysis* 2025): de **qualquer contraste e resolução** — FLAIR axial de
+5 mm, T2, T1 clínico anisotrópico — a rede sintetiza um **MP-RAGE T1 1 mm isotrópico**
+que alimenta a conformação, os modelos treinados em T1 (aseg, DKT, tecidos, superfícies)
+e a visualização.
+
+A inferência replica o `predict_command_line.py` oficial: reamostragem à grade **RAS
+1 mm**, normalização min–max global, UNet de regressão em **blocos com sobreposição**
+(o volume inteiro não cabe na GPU do navegador; recorte central no stitching), saída
+×255 recortada a [0,128]; opcionalmente com **média do volume espelhado L/R**
+(test-time flipping do oficial). Validação: núcleo de bloco real contra a referência da
+rede em T1 real, e restauração visível de um T1 degradado a 5 mm (r = 0,95 entre a
+síntese do degradado e a do original).
+
+Como no artigo, dois avisos: o **SynthSeg dispensa o SynthSR** (é agnóstico a contraste
+e resolução — no `recon-all-clinical` ele segmenta a imagem *original*; o aplicativo
+avisa se você combinar os dois), e **morfometria sobre imagem sintética herda o viés da
+síntese** — espessuras/volumes de um FLAIR-virado-MPRAGE são estimativas, não medidas;
+reporte sempre a sequência de origem (a proveniência vai no JSON/PDF).
+
+### O modo robusto continua clássico
 
 Quando a régua marca C/D, o ramo robusto aplica métodos **clássicos** (reamostragem
-cúbica, correção de viés) inspirados no *papel* do SynthSR dentro do
-`recon-all-clinical`, mas sem a rede: reamostrar não cria informação. Para inferência
-individual em exame anisotrópico, seja conservador.
+cúbica, correção de viés), que não criam informação. Para exame anisotrópico ou de
+contraste não-T1, o caminho com rede é a caixa SynthSR acima.
 
 ## Parcelação cortical DKT (passo 04) — com o FastSurfer de verdade
 
@@ -148,12 +177,13 @@ navegador**):
 | `mri_mc` / `mri_tessellate` | **surface nets** (malha fechada 2-variedade; esfera-teste: volume −0,6%) |
 | `mris_smooth` | **Taubin** λ\|μ, que não encolhe (área da esfera a +0,2% do analítico) |
 | `sample_parc` | parcela por vértice amostrando o volume — mesma filosofia do FastSurfer |
-| `mris_place_surface` → thickness | **aproximação por EDT exata**: d(córtex→SB) + d(córtex→fora da pial) (fantasma de 3 mm: 2,78 ± 0,24) |
+| `mris_place_surface` → thickness | **pareamento de superfícies Fischl–Dale** (*PNAS* 2000): T = ½·[d(white→pial) + d(pial→white)], vértice a vértice entre as malhas suavizadas (fantasma de 3 mm: 2,77) |
 | `mris_anatomical_stats` | espessura/área/volume por região |
 | `mris_sphere` + `mris_register` | **não existe** — análise vertex-wise entre sujeitos exige o FreeSurfer/FastSurfer reais |
 
-A espessura por EDT é aproximação de triagem (sem posicionamento sub-voxel nem correção
-de topologia), declarada no relatório.
+A espessura usa a definição do FreeSurfer (média dos dois sentidos entre white e pial),
+mas sobre malhas derivadas da segmentação — sem o posicionamento sub-voxel nem a correção
+de topologia do `mris_place_surface`; aproximação de triagem, declarada no relatório.
 
 ## Comparação normativa (QC, não clínico)
 
@@ -215,6 +245,7 @@ lib/fsl-prep.js                        reorientação RAS, robustfov, morfologia
 lib/synthseg-core.js                   pré/pós-processamento e tiles do SynthSeg
 lib/tfjs-upsampling3d.js               camadas 3D ausentes no tfjs
 lib/fastsurfer-core.js                 FastSurferCNN v1 (forward, vistas, LIA, agregação)
+lib/synthsr-core.js                    SynthSR: reamostragem RAS 1 mm + blocos de inferência
 lib/dkt-fusion.js                      fusão parcelação→córtex (esquema do predict_synthseg)
 lib/surfaces.js                        EDT, surface nets, Taubin, áreas, MZ3
 lib/normative.js                       percentil/z contra os brain charts
@@ -224,14 +255,17 @@ lib/nifti-writer.js · lib/zip.js       NIfTI-1 e ZIP
 workers/preprocess.worker.js           etapas nativas (FSL-like + ramo robusto)
 workers/mask.worker.js                 limpeza da máscara cerebral (BET-like)
 workers/synthseg.worker.js             inferência SynthSeg em blocos
+workers/synthsr.worker.js              síntese SynthSR (MP-RAGE 1 mm)
 workers/fastsurfer.worker.js           parcelação FastSurferCNN por vistas
-workers/surface.worker.js              superfícies e espessura
+workers/surface.worker.js              superfícies e espessura Fischl–Dale
 brainchop/                             worker de inferência do brain2print (MIT)
 models/synthseg1/                      SynthSeg 1.0 em tfjs f16 (27 MB) + rótulos
+models/synthsr/                        SynthSR v1.0 em tfjs f16 (26 MB) + fixture de paridade
 models/fastsurfer/                     FastSurferCNN v1 f16 (3×3,6 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
+tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
 tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, sem torch)
 licenses/                              licenças e proveniência dos pesos
 vendor/                                NiiVue, dcm2niix WASM, TensorFlow.js, fontes
@@ -254,7 +288,12 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
 
 - **Sem registro esférico** (`sphere.reg`): comparação vertex-wise entre sujeitos e QC por
   número de Euler da tesselagem original exigem FreeSurfer/FastSurfer reais. A espessura
-  daqui é aproximação por EDT — boa para triagem por região, não para efeitos sutis.
+  daqui usa a definição Fischl–Dale sobre malhas derivadas da segmentação, sem
+  posicionamento sub-voxel — boa para triagem por região, não para efeitos sutis.
+- **Morfometria sobre SynthSR é estimativa**: a rede restaura um MP-RAGE plausível, mas
+  números medidos numa imagem sintetizada de FLAIR/T2/T1 espesso carregam o viés da
+  síntese (Gopinath et al., 2025). Use para viabilizar a análise de exames clínicos,
+  reportando a sequência de origem — não para comparar com números de T1 nativo.
 - **Memória/GPU**: a inferência usa WebGL; em GPUs integradas use os modelos compactos ou
   memória baixa. CPU funciona, mas é lenta (SynthSeg/FastSurfer em CPU levam dezenas de
   minutos). Em estudos DICOM grandes, use a triagem para abrir só o necessário.
@@ -271,6 +310,14 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
   ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): pesos originais
   `synthseg_1.0.h5` convertidos para tfjs. Cite *SynthSeg: Segmentation of brain MRI scans
   of any contrast and resolution without retraining* (Medical Image Analysis, 2023).
+- **SynthSR** — Iglesias, Billot, Balbastre, Magdamo, Arnold, Das, Edlow, Alexander,
+  Golland, Fischl ([BBillot/SynthSR](https://github.com/BBillot/SynthSR), Apache 2.0):
+  pesos originais `SynthSR_v10_210712.h5` convertidos para tfjs
+  (`licenses/synthsr.txt`). Cite *SynthSR: A public AI tool to turn heterogeneous
+  clinical brain scans into high-resolution T1-weighted images for 3D morphometry*
+  (Science Advances, 2023) e, para o fluxo completo, *"Recon-all-clinical": Cortical
+  surface reconstruction and analysis of heterogeneous clinical brain MRI* (Gopinath et
+  al., Medical Image Analysis, 2025).
 - **FastSurfer** — Henschel, Conjeti, Estrada, Diers, Fischl, Reuter
   ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0): checkpoints
   oficiais do FastSurferCNN v1 convertidos para tfjs (`licenses/fastsurfer.txt`). Cite

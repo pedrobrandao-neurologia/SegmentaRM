@@ -1,0 +1,31 @@
+SynthSR — modelo em models/synthsr/ (model.json + group1-shard*.bin)
+
+Rede e pesos: SynthSR, Benjamin Billot / Juan Eugenio Iglesias,
+Athinoula A. Martinos Center (MGH/Harvard) e University College London —
+https://github.com/BBillot/SynthSR
+Licença: Apache License 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+Os shards .bin são os pesos oficiais do SynthSR v1.0
+(models/SynthSR_v10_210712.h5) convertidos para TensorFlow.js float16 por
+tools/convert_synthsr_tfjs.py (tensores de variância de BatchNorm que excedem
+o alcance do float16 permanecem em float32). Arquitetura: UNet 3D de regressão
+(5 níveis, 2 convoluções 3³/nível, 24 filtros ×2 por nível, ELU, BatchNorm,
+saída linear de 1 canal), a mesma família neuron/lab2im do SynthSeg.
+
+A inferência no navegador replica o scripts/predict_command_line.py oficial:
+reamostragem à grade RAS 1 mm isotrópica, normalização min–max global para
+[0,1], predição (opcionalmente com média do volume espelhado L/R) e saída
+×255 recortada a [0,128] — aqui em blocos com sobreposição e recorte central,
+porque o volume inteiro não cabe na GPU do navegador.
+
+Citação:
+  Iglesias JE, Billot B, Balbastre Y, Magdamo C, Arnold SE, Das S,
+  Edlow BL, Alexander DC, Golland P, Fischl B.
+  SynthSR: A public AI tool to turn heterogeneous clinical brain scans into
+  high-resolution T1-weighted images for 3D morphometry.
+  Science Advances 9 (2023) eadd3607. https://doi.org/10.1126/sciadv.add3607
+
+Papel no SegmentaRM (estilo recon-all-clinical, Gopinath et al., Medical
+Image Analysis 2025): o MP-RAGE sintético alimenta a conformação, os modelos
+de segmentação treinados em T1 e a visualização. O SynthSeg, agnóstico a
+contraste e resolução, pode segmentar a imagem original diretamente.
