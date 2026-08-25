@@ -50,6 +50,7 @@ const state = {
   segKind: null,
   norms: null,
   native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
+  synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
   wl: null,            // janela de exibição atual { min, max } do volume base
@@ -424,6 +425,7 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.segKind = null
   state.stats = null
   state.native = null
+  state.synthsr = null
   state.bet = null
   state.surf = null
   $('run-dkt').disabled = true
@@ -528,6 +530,53 @@ async function preprocessNative (vol, flags) {
   const file = new File([buf], 'preprocessado.nii')
   const nvol = await NVImage.loadFromFile({ file, name: 'preprocessado.nii' })
   return { vol: nvol, prov: result.prov, buf }
+}
+
+// ---------- SynthSR: MP-RAGE T1 1 mm sintético (recon-all-clinical) ----------
+// Promise dedicada: a resposta é Float32Array [0,128] + dims/affine da grade RAS 1 mm
+// (o runWorker genérico converteria os floats em Uint8Array e corromperia a imagem)
+function runSynthsrWorker (message, pFrom, pTo) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/synthsr.worker.js', { type: 'module' })
+    state.worker = w
+    w.onmessage = (ev) => {
+      const d = ev.data
+      if (d.cmd === 'ui') {
+        if (d.message) log('· ' + d.message)
+        if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
+        if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+      } else if (d.cmd === 'img') {
+        w.terminate(); state.worker = null
+        resolve(d)
+      }
+    }
+    w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker SynthSR')) }
+    w.postMessage(message, [message.img.buffer])
+  })
+}
+
+/** roda o SynthSR sobre um NVImage e devolve { vol: NVImage 1 mm RAS, buf, flip } */
+async function runSynthsrStep (vol, isGPU, lowMem, flip) {
+  const t0 = performance.now()
+  const src = new Float32Array(vol.img.length)
+  const slope = vol.hdr.scl_slope || 1
+  const inter = vol.hdr.scl_inter || 0
+  for (let i = 0; i < src.length; i++) src[i] = vol.img[i] * slope + inter
+  const r = await runSynthsrWorker({
+    modelUrl: new URL('./models/synthsr/model.json', location.href).href,
+    img: src,
+    dims: dimsOf(vol),
+    affine: affineOf(vol).flat(),
+    isGPU,
+    tile: lowMem ? 64 : 96,
+    flip
+  }, 0.16, 0.4)
+  const rows = [0, 1, 2, 3].map(i => r.affine.slice(i * 4, i * 4 + 4))
+  const buf = writeNifti({ dims: r.dims, pixDims: [1, 1, 1], affine: rows, datatype: 'float32', description: 'segmentarm synthsr mprage 1mm' }, r.img)
+  const file = new File([buf], 'synthsr.nii')
+  const nvol = await NVImage.loadFromFile({ file, name: 'synthsr.nii' })
+  log(`SynthSR concluído em ${((performance.now() - t0) / 1000).toFixed(0)} s — grade ${r.dims.join('×')} @ 1 mm.`, 'ok')
+  return { vol: nvol, buf, flip }
 }
 
 // ---------- execução de redes (workers) ----------
@@ -673,6 +722,7 @@ async function refreshOverlay () {
 function updateIntermediateExports () {
   const q = (k) => document.querySelector(`[data-export="${k}"]`)
   if (q('nii-native')) q('nii-native').disabled = !state.native
+  if (q('nii-synthsr')) q('nii-synthsr').disabled = !state.synthsr
   if (q('nii-mask')) q('nii-mask').disabled = !state.bet
   if (q('nii-brain')) q('nii-brain').disabled = !state.bet
 }
@@ -886,6 +936,7 @@ async function runSegmentation () {
     const nv = state.nv
     const pipeline = effectivePipeline()
     state.native = null
+    state.synthsr = null
     state.bet = null
     // etapas nativas (≈ FSL), antes da conformação: reorientação → recorte → reamostragem
     // (só no robusto) → viés → suavização — a imagem corrigida alimenta todo o resto
@@ -898,9 +949,20 @@ async function runSegmentation () {
     }
     let workVol = state.rawVol
     if (flags.doReorient || flags.doCrop || flags.doResample || flags.doBias || flags.doSmooth) {
-      if (pipeline === 'robust') log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; não é a rede SynthSR).')
+      if (pipeline === 'robust') log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; para a rede SynthSR de verdade, marque "MP-RAGE sintético 1 mm").')
       state.native = await preprocessNative(state.rawVol, flags)
       workVol = state.native.vol
+    }
+    // SynthSR (recon-all-clinical): sintetiza um MP-RAGE T1 1 mm a partir de qualquer
+    // contraste/resolução — a imagem sintética alimenta a conformação e os modelos
+    // treinados em T1 (aseg/DKT/tecidos) e a visualização
+    if ($('opt-synthsr') && $('opt-synthsr').checked) {
+      if ($('model').value === 'synthseg') {
+        log('Nota: o SynthSeg é agnóstico a contraste/resolução — no recon-all-clinical ele segmenta a imagem ORIGINAL; aqui o SynthSR alimentará a rede mesmo assim, por sua escolha.')
+      }
+      log('SynthSR v1.0 — sintetizando MP-RAGE T1 1 mm (Iglesias et al., Sci Adv 2023)…')
+      state.synthsr = await runSynthsrStep(workVol, $('backend').value !== 'cpu', $('mem').value === 'low', $('opt-synthsr-flip').checked)
+      workVol = state.synthsr.vol
     }
     const steps = []
     if (flags.doReorient) steps.push('reorientação RAS')
@@ -908,6 +970,7 @@ async function runSegmentation () {
     if (flags.doResample) steps.push('reamostragem cúbica Catmull-Rom')
     if (flags.doBias) steps.push('correção de viés')
     if (flags.doSmooth) steps.push('suavização')
+    if (state.synthsr) steps.push('SynthSR → MP-RAGE T1 1 mm sintético' + (state.synthsr.flip ? ' (média L/R)' : ''))
     state.pipelineUsed = (pipeline === 'robust' ? 'robusto (' : 'padrão (') +
       (steps.length ? steps.join(' + ') + ' → ' : '') + 'conformação direta)'
 
@@ -1147,6 +1210,9 @@ function metaNow () {
     surf: state.surf ? { regioes: state.surf.stats } : null,
     preproc: {
       nativo: state.native ? state.native.prov : null,
+      synthsr: state.synthsr
+        ? { aplicado: true, flipLR: state.synthsr.flip, rede: 'SynthSR v1.0 (Iglesias et al., Sci Adv 2023)', papel: 'MP-RAGE T1 1 mm sintético alimentou a conformação e a segmentação (estilo recon-all-clinical)' }
+        : { aplicado: false },
       extracaoCerebral: state.bet
         ? { aplicada: true, f: state.bet.f, mascara_cm3: +(state.bet.voxels / 1000).toFixed(1), normalizadaNaMascara: state.bet.normalized, limpeza: state.bet.cleanupLog }
         : { aplicada: false }
@@ -1203,6 +1269,7 @@ async function makeExports () {
       return await gzipBuffer(buf)
     },
     niiNative: async () => state.native ? await gzipBuffer(state.native.buf) : null,
+    niiSynthsr: async () => state.synthsr ? await gzipBuffer(state.synthsr.buf) : null,
     niiMask: async () => {
       if (!state.bet) return null
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: `segmentarm mascara cerebral f=${state.bet.f}` }, state.bet.mask)
@@ -1217,7 +1284,7 @@ async function makeExports () {
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf', 'nii-native', 'nii-mask', 'nii-brain'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -1235,6 +1302,12 @@ async function handleExport (kind) {
         const b = await ex.niiNative()
         if (b) saveBlob(b, `${sub}_preproc_nativo.nii.gz`)
         else log('Sem pré-processado nativo — nenhuma etapa nativa foi aplicada nesta execução.', 'err')
+        break
+      }
+      case 'nii-synthsr': {
+        const b = await ex.niiSynthsr()
+        if (b) saveBlob(b, `${sub}_synthsr_mprage.nii.gz`)
+        else log('Sem MP-RAGE sintético — rode com "MP-RAGE sintético 1 mm (SynthSR)" marcado.', 'err')
         break
       }
       case 'nii-mask': {
@@ -1263,6 +1336,7 @@ async function handleExport (kind) {
           for (const m of state.surf.meshes) files.push({ name: `${sub}_${m.name}.mz3`, data: new Uint8Array(m.mz3) })
         }
         if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
+        if (state.synthsr) files.push({ name: `${sub}_synthsr_mprage.nii.gz`, data: new Uint8Array(await ex.niiSynthsr()) })
         if (state.bet) {
           files.push({ name: `${sub}_mascara.nii.gz`, data: new Uint8Array(await ex.niiMask()) })
           files.push({ name: `${sub}_cerebro.nii.gz`, data: new Uint8Array(await ex.niiBrain()) })

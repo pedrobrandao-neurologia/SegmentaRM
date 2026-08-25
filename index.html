@@ -78,6 +78,8 @@
         <input type="range" id="bet-f" min="0.1" max="0.9" step="0.05" value="0.5" title="Análogo ao -f do BET: maior = máscara menor">
       </div>
       <label class="check" title="Reescala [p2,p98]→[0,255] dentro da máscara (efeito ≈ FAST); muda o domínio visto pela rede"><input type="checkbox" id="opt-norm"> Normalização na máscara <span class="eq">≈ FAST</span></label>
+      <label class="check" title="Rede SynthSR v1.0 (Iglesias et al., Sci Adv 2023): sintetiza um MP-RAGE T1 1 mm isotrópico a partir de qualquer contraste/resolução — núcleo do recon-all-clinical. A imagem sintética alimenta a conformação, os modelos treinados em T1 e a visualização. Baixa a rede (26 MB) na primeira vez"><input type="checkbox" id="opt-synthsr"> MP-RAGE sintético 1 mm <span class="eq">SynthSR</span></label>
+      <label class="check" style="padding-left:22px" title="Média com a predição do volume espelhado L/R (test-time flipping do script oficial); melhora a simetria e dobra o tempo"><input type="checkbox" id="opt-synthsr-flip"> média com flip L/R</label>
       <p class="note">A máscara é sobreposta no visualizador para inspeção antes da segmentação.</p>
     </section>
 
@@ -212,8 +214,9 @@
       <section class="panel" id="surf-panel" hidden>
         <h3>Superfície cortical — espessura e área</h3>
         <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Espessura por transformada de distância sobre a parcelação DKT — aproximação
-        (não é o <code>mris_place_surface</code>); área da malha pial suavizada.</p>
+        <p class="note">Espessura por pareamento das superfícies branca↔pial (média dos dois sentidos,
+        Fischl &amp; Dale 2000) sobre a parcelação DKT — aproximação (não é o
+        <code>mris_place_surface</code>); área da malha pial suavizada.</p>
       </section>
 
       <section class="panel" id="norm-panel" hidden>
@@ -244,6 +247,7 @@
         <button class="btn sm" data-export="nii-seg">Segmentação .nii.gz</button>
         <button class="btn sm" data-export="nii-conf">Conformado .nii.gz</button>
         <button class="btn sm" data-export="nii-native" disabled>Pré-proc. nativo</button>
+        <button class="btn sm" data-export="nii-synthsr" disabled>MP-RAGE sintético</button>
         <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
