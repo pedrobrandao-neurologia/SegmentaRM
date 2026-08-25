@@ -251,6 +251,7 @@
         <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
+        <button class="btn sm" data-export="errlog" disabled title="Registro dos erros desta máquina (contexto completo para diagnóstico e reprocessamento)">Log de erros</button>
       </div>
       <div class="field" style="margin-top:10px">
         <label for="decimal">Separador decimal do CSV</label>
@@ -275,6 +276,20 @@
 </div>
 
 <!-- triagem de séries DICOM: escolher o que abrir ANTES de alocar memória -->
+<dialog id="dlg-error" class="series-dlg err-dlg" aria-labelledby="err-title">
+  <h3 id="err-title">Erro</h3>
+  <p class="err-stage" id="err-stage"></p>
+  <p class="err-msg" id="err-msg"></p>
+  <p class="note" id="err-why"></p>
+  <p class="err-what">O que fazer:</p>
+  <ol class="err-steps" id="err-steps"></ol>
+  <div class="btn-row" style="margin-top:12px">
+    <button class="btn sm" id="err-download">Baixar log de erro (.txt)</button>
+    <span class="spacer"></span>
+    <button class="btn sm primary" id="err-close" autofocus>Entendi</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-series" class="series-dlg" aria-labelledby="series-title">
   <h3 id="series-title">Escolher séries para abrir</h3>
   <p class="note" id="series-info"></p>
