@@ -251,6 +251,21 @@
   <!-- rodapé: log de uma linha (histórico no title) -->
   <footer class="log"><span class="cursor">›</span><div class="console" id="console" aria-live="polite"><p>Pronto para começar.</p></div></footer>
 </div>
+
+<!-- triagem de séries DICOM: escolher o que abrir ANTES de alocar memória -->
+<dialog id="dlg-series" class="series-dlg" aria-labelledby="series-title">
+  <h3 id="series-title">Escolher séries para abrir</h3>
+  <p class="note" id="series-info"></p>
+  <ul id="series-list"></ul>
+  <label class="check" style="margin-top:10px" title="Séries não comprimidas são montadas corte a corte, sem o conversor WASM — mais rápido e com pico de memória mínimo"><input type="checkbox" id="series-direct" checked> Leitura direta quando possível <span class="eq">rápida · menos memória</span></label>
+  <div class="btn-row" style="margin-top:12px">
+    <button class="btn sm" id="series-all">Todas</button>
+    <button class="btn sm" id="series-none">Nenhuma</button>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="series-cancel">Cancelar</button>
+    <button class="btn sm primary" id="series-open">Abrir selecionadas</button>
+  </div>
+</dialog>
 <script type="module" src="./app.js"></script>
 </body>
 </html>

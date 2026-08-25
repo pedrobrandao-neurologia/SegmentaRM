@@ -12,6 +12,20 @@ corpo caloso**, com exportação em **CSV, JSON, SPSS (.sav), PDF e NIfTI**.
 
 ---
 
+## Estudos DICOM grandes: triagem por série
+
+Ao abrir uma pasta DICOM (ou arrastá-la), o aplicativo **não converte o estudo inteiro**:
+lê apenas os cabeçalhos (~128 KB por arquivo, sem pixel data), agrupa por
+`SeriesInstanceUID` e mostra um diálogo para **escolher quais séries abrir** — um estudo
+de 4.000 arquivos vira a conversão de uma série de 200. Cada série selecionada é
+processada **uma por vez** (o pico de memória é o de uma série, não o do estudo), e
+séries não comprimidas (Little Endian) são montadas **corte a corte direto em NIfTI**,
+sem passar pelo conversor WASM — mais rápido e com alocação mínima; as demais vão pelo
+dcm2niix só com os arquivos daquela série. Isso elimina o `ArrayBuffer allocation failed`
+em máquinas com pouca memória. Mecanismo portado do
+[LUME](https://github.com/pedrobrandao-neurologia/LUME), do mesmo autor
+(`lib/dicom-scan.js`).
+
 ## O fluxo
 
 ```
