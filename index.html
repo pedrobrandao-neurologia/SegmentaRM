@@ -134,6 +134,17 @@
       permanece intacta. Em GPU leva alguns minutos; em CPU é lento.</p>
     </section>
 
+    <section class="step" id="step-surf">
+      <h2><b>05</b> Superfícies</h2>
+      <button class="btn" id="run-surf" disabled>Reconstruir superfícies</button>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="show-surf" disabled> Mostrar 3D no visualizador</label>
+      <p class="note">A partir da parcelação DKT: malhas <b>white/pial</b> por hemisfério
+      (análogo navegador do <code>recon-surf</code>: <code>mri_mc</code> + <code>mris_smooth</code> +
+      <code>sample_parc</code>), pial colorida pelas parcelas, e <b>espessura</b> por transformada
+      de distância — aproximação para morfometria por região; não é o
+      <code>mris_place_surface</code> do FreeSurfer.</p>
+    </section>
+
     <section class="step about">
       <h2>Sobre</h2>
       <p class="note">SynthSeg (Billot/Iglesias, Apache 2.0) convertido para tfjs; modelos MeshNet do
@@ -196,6 +207,13 @@
           <select id="group-filter" style="max-width:170px"><option value="">todos os grupos</option></select>
         </div>
         <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="surf-panel" hidden>
+        <h3>Superfície cortical — espessura e área</h3>
+        <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
+        <p class="note">Espessura por transformada de distância sobre a parcelação DKT — aproximação
+        (não é o <code>mris_place_surface</code>); área da malha pial suavizada.</p>
       </section>
 
       <section class="panel" id="norm-panel" hidden>

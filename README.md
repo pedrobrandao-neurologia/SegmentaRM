@@ -99,6 +99,31 @@ como no mascaramento oficial); na aseg compacta o córtex é bilateral e o hemis
 da parcelação. Estruturas ausentes num sujeito são aceitas — contagem menor de rótulos é
 aviso, não erro.
 
+### Superfícies corticais (passo 05) — o análogo navegador do recon-surf
+
+Sobre um resultado com parcelação DKT, o passo **05 · Superfícies** reconstrói as malhas
+**white** e **pial** por hemisfério e calcula a tabela estilo `aparc.stats` — **espessura
+média ± dp, área pial e volume por região DKT** — no inspetor, no PDF, no CSV, no JSON,
+no `.sav` (colunas `thick_*`/`surfarea_*`) e no `.zip` (malhas `.mz3`). A pial aparece
+**no painel central**, colorida pelas parcelas (chave "Mostrar 3D").
+
+O mapeamento honesto com o `recon-surf` do FastSurfer (que continua sendo binário
+FreeSurfer, horas de CPU, e **não roda em navegador**):
+
+| recon-surf | Aqui (`lib/surfaces.js`, Web Worker) |
+|---|---|
+| `mri_fill` (separar hemisférios, fechar SB) | máscaras white/pial por hemisfério a partir dos rótulos + fechamento morfológico, maior componente e cavidades |
+| `mri_mc` / `mri_tessellate` | **surface nets** sobre a máscara (malha fechada, 2-variedade; validada em esfera: volume −0,6%) |
+| `mris_smooth` | **suavização de Taubin** λ\|μ, que não encolhe (área da esfera a +0,2% do analítico) |
+| `sample_parc` (rótulos DKT volume→superfície) | parcela por vértice amostrando o volume — mesma filosofia |
+| `mris_place_surface` → `?h.thickness` | **aproximação por transformada de distância**: espessura = d(córtex→SB) + d(córtex→fora da pial), EDT exata de Felzenszwalb (fantasma de casca de 3 mm: 2,78 ± 0,24) |
+| `mris_anatomical_stats` → `?h.aparc.stats` | espessura/área/volume por região na tabela e nas exportações |
+| `mris_sphere` + `mris_register` (`?h.sphere.reg`) | **não existe** — análise vertex-wise entre sujeitos continua exigindo o FreeSurfer/FastSurfer de verdade |
+
+As diferenças são declaradas no relatório: a espessura por EDT é uma aproximação de
+triagem (sem posicionamento sub-voxel de superfícies nem correção de topologia); o número
+de Euler das malhas aqui é o da máscara limpa, não um QC da tesselagem original.
+
 ### Modelos embarcados (brainchop, licença MIT)
 
 | Opção na interface | Pasta | Classes |
