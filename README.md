@@ -282,6 +282,14 @@ contraste, ↕ brilho, duplo clique volta ao automático), inspetor à direita e
 rodapé. O visualizador **se recupera sozinho de perda de contexto WebGL** (comum após
 inferência pesada na GPU — era a causa da tela branca).
 
+O inspetor traz a **linha do tempo do processamento**: cada etapa aparece em sequência
+(rodando → concluída/aviso/erro) com as **decisões tomadas em função da imagem** (pipeline
+robusto acionado pela régua, SynthSR ativo, rede recebendo só o cérebro extraído, máscara
+pequena, hemisfério sem parcelas…) e **chips de um clique** que trocam o visualizador para
+o entregável de cada etapa — exame original, pré-processado nativo, MP-RAGE sintético,
+conformado, máscara (QC), cérebro extraído, segmentação/parcelação e malhas 3D. Uma etapa
+com erro ganha os chips "o que fazer" (reabre o tutorial) e "baixar log de erro".
+
 **Quando uma etapa falha**, um pop-up explica em português o que aconteceu e o que fazer
 (ex.: superfícies sem parcelação DKT → re-rodar o passo 04, trocar a fonte ou usar
 CPU/memória baixa), e cada erro vira um registro num **log exportável (.txt)** — com

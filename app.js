@@ -241,6 +241,145 @@ function showErrorDialog (etapa, err) {
 function stepError (etapa, err, diagnostico = null) {
   recordError(etapa, err, diagnostico)
   showErrorDialog(etapa, err)
+  tlFail(null, err, etapa)
+}
+
+// ---------- linha do tempo do processamento (inspetor direito) ----------
+// cada etapa vira um item sequencial com status (rodando/ok/aviso/erro), notas de
+// decisões e avisos, e chips de um clique para ver o entregável no visualizador
+const TL = { items: new Map(), current: null }
+
+function tlReset () {
+  TL.items.clear()
+  TL.current = null
+  const el = $('timeline')
+  if (el) el.innerHTML = ''
+  const p = $('tl-panel')
+  if (p) p.hidden = true
+}
+
+function tlRemove (id) {
+  const it = TL.items.get(id)
+  if (it) { it.li.remove(); TL.items.delete(id) }
+  if (TL.current === id) TL.current = null
+}
+
+function tlStage (id, title) {
+  const panel = $('tl-panel')
+  if (!panel) return
+  panel.hidden = false
+  tlRemove(id)
+  const li = document.createElement('li')
+  li.className = 'tl on'
+  li.innerHTML = '<span class="tl-dot" aria-hidden="true"></span><div class="tl-body">' +
+    `<div class="tl-head"><strong></strong><span class="tl-time">${new Date().toTimeString().slice(0, 8)}</span></div>` +
+    '<div class="tl-notes"></div><div class="tl-acts" hidden></div></div>'
+  li.querySelector('strong').textContent = title
+  $('timeline').appendChild(li)
+  TL.items.set(id, { li, notes: li.querySelector('.tl-notes'), acts: li.querySelector('.tl-acts') })
+  TL.current = id
+  try { li.scrollIntoView({ block: 'nearest' }) } catch { /* sem scroll */ }
+}
+
+/** kind: 'info' | 'decision' | 'warn' | 'errnote' */
+function tlNote (id, text, kind = 'info') {
+  const it = TL.items.get(id)
+  if (!it) return
+  const p = document.createElement('p')
+  p.className = 'tl-note' + (kind !== 'info' ? ' ' + kind : '')
+  p.textContent = text
+  it.notes.appendChild(p)
+}
+
+/** conclui a etapa; views = [{label, view}] vira chips que trocam o visualizador */
+function tlDone (id, views = [], status = 'ok') {
+  const it = TL.items.get(id)
+  if (!it) return
+  it.li.className = 'tl ' + status
+  for (const v of views) {
+    const b = document.createElement('button')
+    b.className = 'chip'
+    b.type = 'button'
+    b.textContent = v.label
+    b.onclick = () => viewDeliverable(v.view, v.label)
+    it.acts.appendChild(b)
+  }
+  if (it.acts.children.length) it.acts.hidden = false
+  if (TL.current === id) TL.current = null
+}
+
+function tlFail (id, err, etapa = '') {
+  const key = id || TL.current
+  const it = TL.items.get(key)
+  if (!it) return
+  it.li.className = 'tl err'
+  tlNote(key, err && err.message ? err.message : String(err), 'errnote')
+  const b1 = document.createElement('button')
+  b1.className = 'chip'
+  b1.type = 'button'
+  b1.textContent = 'o que fazer'
+  b1.onclick = () => showErrorDialog(etapa || 'Etapa com erro', err)
+  const b2 = document.createElement('button')
+  b2.className = 'chip'
+  b2.type = 'button'
+  b2.textContent = 'baixar log de erro'
+  b2.onclick = exportErrorLog
+  it.acts.append(b1, b2)
+  it.acts.hidden = false
+  if (TL.current === key) TL.current = null
+}
+
+// ---------- visualização de entregáveis (um clique na linha do tempo) ----------
+const viewCache = new Map() // intermediários reconstruídos como NVImage sob demanda
+
+async function intermediateVol (key, img, datatype, desc) {
+  if (viewCache.has(key)) return viewCache.get(key)
+  const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype, description: desc }, img)
+  const nvol = await NVImage.loadFromFile({ file: new File([buf], key + '.nii'), name: key + '.nii' })
+  viewCache.set(key, nvol)
+  return nvol
+}
+
+/** troca o visualizador central para um entregável: raw | native | synthsr | conf | mask | brain | seg | surf */
+async function viewDeliverable (kind, label = '') {
+  try {
+    await ensureViewerAlive()
+    const nv = state.nv
+    if (kind === 'surf') {
+      if (!state.surf) { log('Sem malhas de superfície — rode o passo 05.', 'err'); return }
+      $('show-surf').checked = true
+      await showSurfaces(true)
+      log('Visualizador: malhas 3D das superfícies.', 'ok')
+      return
+    }
+    if (nv.meshes && nv.meshes.length) { $('show-surf').checked = false; await showSurfaces(false) }
+    let base = null
+    if (kind === 'raw') base = state.rawVol
+    else if (kind === 'native') base = state.native && state.native.vol
+    else if (kind === 'synthsr') base = state.synthsr && state.synthsr.vol
+    else if (kind === 'conf' || kind === 'seg' || kind === 'mask') base = state.conformed
+    else if (kind === 'brain') base = state.bet && await intermediateVol('brain', state.bet.brain, 'uint8', 'cérebro extraído')
+    if (!base) { log('Este entregável não está mais disponível — rode a etapa de novo.', 'err'); return }
+    while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
+    await nv.addVolume(base)
+    state.wl = null
+    autoWindow()
+    if (kind === 'seg' && state.seg) await refreshOverlay()
+    if (kind === 'mask' && state.bet) {
+      const overlay = await state.conformed.clone()
+      overlay.zeroImage()
+      overlay.hdr.scl_slope = 1
+      overlay.hdr.scl_inter = 0
+      overlay.img = new Uint8Array(state.bet.mask)
+      overlay.colormap = 'red'
+      overlay.opacity = (+$('opacity').value) / 100
+      await nv.addVolume(overlay)
+    }
+    nv.drawScene()
+    log(`Visualizador: ${label || kind}.`, 'ok')
+  } catch (e) {
+    log('Não consegui exibir este entregável: ' + e.message, 'err')
+  }
 }
 
 // ---------- visualizador ----------
@@ -624,6 +763,16 @@ async function loadVolumeFile (file, sidecar, desc) {
   $('stage-lede').textContent = `${desc} — ${dims.join('×')} voxels de ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm. ` +
     `Régua de qualidade: nível ${state.quality.grade} (${state.quality.gradeTxt}).`
   log(`Exame carregado: ${dims.join('×')} @ ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm — nível ${state.quality.grade}.`, 'ok')
+
+  // linha do tempo: novo exame zera tudo e abre a primeira etapa
+  tlReset()
+  viewCache.clear()
+  tlStage('load', '01 · Exame carregado')
+  tlNote('load', `${desc} — ${dims.join('×')} @ ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm`)
+  tlNote('load', `régua de qualidade: nível ${state.quality.grade} (${state.quality.gradeTxt})`, state.quality.grade >= 'C' ? 'warn' : 'info')
+  for (const f of (state.quality.findings || []).filter(f => f.bad)) tlNote('load', f.txt, 'warn')
+  if (state.quality.robustRecommended) tlNote('load', 'a régua recomenda o pipeline robusto — será aplicado no modo "Automático"', 'decision')
+  tlDone('load', [{ label: 'ver exame original', view: 'raw' }])
   progress(0)
 }
 
@@ -958,6 +1107,8 @@ async function runDktStep () {
   state.running = true
   $('run').disabled = true
   $('run-dkt').disabled = true
+  tlRemove('surf')
+  tlStage('dkt', '04 · Parcelação DKT')
   try {
     const isGPU = $('backend').value !== 'cpu'
     const variant = $('mem').value === 'low' ? 'low' : 'high'
@@ -982,6 +1133,7 @@ async function runDktStep () {
         batch: variant === 'low' ? 1 : 2
       }, 0.05, 0.85)
     }
+    tlNote('dkt', `fonte: ${parcName} sobre ${src.pt} — ${isGPU ? 'GPU (WebGL)' : 'CPU'}`, 'decision')
     log(`Fundindo a parcelação (${parcName}) na fita cortical (esquema do predict_synthseg: seg==córtex recebe a parcela)…`)
     const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed), src.fuse)
     const s = fused.stats
@@ -1002,7 +1154,9 @@ async function runDktStep () {
       }
       if (!lhP || !rhP) {
         log(`Atenção: a fusão não deixou parcelas DKT no hemisfério ${!lhP && !rhP ? 'esquerdo NEM no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto. Re-rode o DKT com outra fonte (FastSurfer 3 vistas / axial+coronal / brainchop), em CPU ou memória baixa.`, 'err')
+        tlNote('dkt', `sem parcelas no hemisfério ${!lhP && !rhP ? 'esquerdo nem no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto; re-rode com outra fonte, CPU ou memória baixa`, 'warn')
       }
+      var dktHemiOk = !!(lhP && rhP) // usado no fechamento da etapa abaixo
     }
     state.surf = null
     await showSurfaces(false)
@@ -1011,6 +1165,8 @@ async function runDktStep () {
     $('show-surf').checked = false
     $('surf-panel').hidden = true
     await applySegmentationResult(src.labels, src.colormap)
+    tlNote('dkt', `fusão: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais`)
+    tlDone('dkt', [{ label: 'ver parcelação DKT', view: 'seg' }], dktHemiOk ? 'ok' : 'warn')
   } catch (e) {
     log(`Erro no passo DKT — o resultado ${src.pt} permanece intacto: ` + e.message, 'err')
     stepError('04 · Parcelação DKT', e)
@@ -1026,6 +1182,7 @@ async function runDktStep () {
 // ---------- passo 05: superfícies corticais (análogo navegador do recon-surf) ----------
 async function runSurfStep () {
   if (state.running) return
+  tlStage('surf', '05 · Superfícies corticais')
   if (!state.seg || !/-dkt$/.test(state.segKind)) {
     const e = new Error('as superfícies partem de um resultado com parcelação DKT — rode o passo 04 antes')
     log('As superfícies partem de um resultado com parcelação DKT — rode o passo 04 antes.', 'err')
@@ -1055,6 +1212,7 @@ async function runSurfStep () {
     }
     if (!lh || !rh) {
       log(`Aviso: córtex parcelado só no hemisfério ${lh ? 'esquerdo' : 'direito'} — as superfícies prosseguem só com esse lado; re-rode o passo 04 para recuperar o outro.`, 'err')
+      tlNote('surf', `córtex parcelado só no hemisfério ${lh ? 'esquerdo' : 'direito'} — prosseguindo só com esse lado`, 'warn')
     }
   }
   state.running = true
@@ -1080,7 +1238,7 @@ async function runSurfStep () {
         voxVol: voxVolOf(state.conformed)
       })
     })
-    if (r.aviso) log('Aviso: ' + r.aviso, 'err')
+    if (r.aviso) { log('Aviso: ' + r.aviso, 'err'); tlNote('surf', r.aviso, 'warn') }
     for (const reg of r.stats) reg.pt = ptNameOf(reg.name)
     state.surf = { meshes: r.meshes, stats: r.stats }
     renderSurfStats()
@@ -1089,6 +1247,8 @@ async function runSurfStep () {
     await ensureViewerAlive()
     await showSurfaces(true)
     log(`Superfícies prontas: ${r.meshes.length} malhas, ${r.stats.length} regiões com espessura/área.`, 'ok')
+    tlNote('surf', `${r.meshes.length} malhas white/pial · ${r.stats.length} regiões com espessura/área (Fischl–Dale)`)
+    tlDone('surf', [{ label: 'malhas 3D', view: 'surf' }, { label: 'voltar à parcelação', view: 'seg' }], r.aviso ? 'warn' : 'ok')
     progress(0)
   } catch (e) {
     log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
@@ -1151,6 +1311,9 @@ async function runSegmentation () {
     state.native = null
     state.synthsr = null
     state.bet = null
+    // linha do tempo: uma nova execução invalida as etapas 02–05 anteriores
+    for (const id of ['prep', 'synthsr', 'conform', 'bet', 'seg', 'dkt', 'surf']) tlRemove(id)
+    viewCache.clear()
     // etapas nativas (≈ FSL), antes da conformação: reorientação → recorte → reamostragem
     // (só no robusto) → viés → suavização — a imagem corrigida alimenta todo o resto
     const flags = {
@@ -1162,20 +1325,35 @@ async function runSegmentation () {
     }
     let workVol = state.rawVol
     if (flags.doReorient || flags.doCrop || flags.doResample || flags.doBias || flags.doSmooth) {
-      if (pipeline === 'robust') log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; para a rede SynthSR de verdade, marque "MP-RAGE sintético 1 mm").')
+      tlStage('prep', '02 · Pré-processamento nativo')
+      tlNote('prep', [flags.doReorient && 'reorientação RAS', flags.doCrop && 'recorte de pescoço',
+        flags.doResample && 'reamostragem cúbica', flags.doBias && 'correção de viés',
+        flags.doSmooth && 'suavização'].filter(Boolean).join(' + '))
+      if (pipeline === 'robust') {
+        log('Modo robusto: reamostragem cúbica + correção de campo de viés (aproximação clássica; para a rede SynthSR de verdade, marque "MP-RAGE sintético 1 mm").')
+        tlNote('prep', $('pipeline').value === 'auto'
+          ? 'pipeline robusto acionado pela régua de qualidade (entrada anisotrópica/ruidosa)'
+          : 'pipeline robusto selecionado manualmente', 'decision')
+      }
       state.native = await preprocessNative(state.rawVol, flags)
       workVol = state.native.vol
+      tlDone('prep', [{ label: 'pré-processado nativo', view: 'native' }])
     }
     // SynthSR (recon-all-clinical): sintetiza um MP-RAGE T1 1 mm a partir de qualquer
     // contraste/resolução — a imagem sintética alimenta a conformação e os modelos
     // treinados em T1 (aseg/DKT/tecidos) e a visualização
     if ($('opt-synthsr') && $('opt-synthsr').checked) {
+      tlStage('synthsr', 'SynthSR — MP-RAGE T1 1 mm sintético')
+      tlNote('synthsr', 'síntese de um MP-RAGE 1 mm a partir do exame (recon-all-clinical) — alimenta a conformação e os modelos treinados em T1', 'decision')
       if ($('model').value === 'synthseg') {
         log('Nota: o SynthSeg é agnóstico a contraste/resolução — no recon-all-clinical ele segmenta a imagem ORIGINAL; aqui o SynthSR alimentará a rede mesmo assim, por sua escolha.')
+        tlNote('synthsr', 'o SynthSeg é agnóstico a contraste — o SynthSR é dispensável para esse modelo', 'warn')
       }
+      if ($('opt-synthsr-flip').checked) tlNote('synthsr', 'média com flip L/R ativa (dobra o tempo)')
       log('SynthSR v1.0 — sintetizando MP-RAGE T1 1 mm (Iglesias et al., Sci Adv 2023)…')
       state.synthsr = await runSynthsrStep(workVol, $('backend').value !== 'cpu', $('mem').value === 'low', $('opt-synthsr-flip').checked)
       workVol = state.synthsr.vol
+      tlDone('synthsr', [{ label: 'MP-RAGE sintético', view: 'synthsr' }])
     }
     const steps = []
     if (flags.doReorient) steps.push('reorientação RAS')
@@ -1188,6 +1366,7 @@ async function runSegmentation () {
       (steps.length ? steps.join(' + ') + ' → ' : '') + 'conformação direta)'
 
     log('Conformando para 256³ · 1 mm (estilo FreeSurfer)…')
+    tlStage('conform', 'Conformação 256³ · 1 mm')
     progress(0.4)
     while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
     await nv.addVolume(workVol)
@@ -1198,6 +1377,7 @@ async function runSegmentation () {
     state.wl = null
     autoWindow()
     log('Conformação concluída.', 'ok')
+    tlDone('conform', [{ label: 'volume conformado', view: 'conf' }])
 
     // modelo
     const kind = $('model').value
@@ -1209,10 +1389,17 @@ async function runSegmentation () {
     // a rede recebe o cérebro extraído (e normalizado, se marcado)
     let infImg = null
     if ($('opt-bet').checked && kind !== 'mask') {
+      tlStage('bet', 'Extração cerebral (≈ BET)')
       await runBrainExtraction(conformed, isGPU, variant)
       infImg = state.bet.brain
+      const cm3 = state.bet.voxels / 1000
+      tlNote('bet', `máscara de ${cm3.toFixed(0)} cm³ · f=${state.bet.f}${state.bet.normalized ? ' · intensidade normalizada na máscara' : ''}`)
+      if (cm3 < 700) tlNote('bet', 'máscara pequena — o limiar f pode estar alto; confira a sobreposição', 'warn')
+      tlNote('bet', 'a rede de segmentação receberá só o cérebro extraído', 'decision')
+      tlDone('bet', [{ label: 'máscara (QC)', view: 'mask' }, { label: 'cérebro extraído', view: 'brain' }], cm3 < 700 ? 'warn' : 'ok')
     }
 
+    tlStage('seg', '03 · Segmentação')
     if (MODEL_MAP[kind].synth) {
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
       log(`Segmentando com ${state.modelUsed}…`)
@@ -1237,6 +1424,9 @@ async function runSegmentation () {
     $('show-surf').checked = false
     $('surf-panel').hidden = true
     await applySegmentationResult(labelsPath, colormapPath)
+    tlNote('seg', `${state.modelUsed} — ${isGPU ? 'GPU (WebGL)' : 'CPU'}`)
+    if (state.stats) tlNote('seg', `volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³`)
+    tlDone('seg', [{ label: 'ver segmentação', view: 'seg' }])
   } catch (e) {
     log('Erro: ' + e.message, 'err')
     if (/memory|memória|texture|alloc/i.test(String(e.message))) {

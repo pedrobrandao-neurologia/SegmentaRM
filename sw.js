@@ -1,7 +1,7 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v13'
+const CACHE = 'segmentarm-v14'
 const SHELL = [
   './',
   './index.html',
