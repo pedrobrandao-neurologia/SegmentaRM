@@ -114,6 +114,7 @@
         </div>
       </div>
       <button class="btn primary" id="run" disabled>Segmentar</button>
+      <button class="btn" id="run-clinical" disabled title="Encadeia os passos 03→04→05 no fluxo do recon-all-clinical: SynthSeg → parcelação DKT (FastSurferCNN) → superfícies por SDF com espessura, norm sintético e talairach.xfm">Pipeline completo <span class="eq">recon-all-clinical</span></button>
       <p class="note">A primeira execução baixa o modelo; depois tudo funciona offline.</p>
     </section>
 
@@ -138,13 +139,22 @@
 
     <section class="step" id="step-surf">
       <h2><b>05</b> Superfícies</h2>
+      <div class="field">
+        <label for="surf-engine">Fonte das SDFs</label>
+        <select id="surf-engine">
+          <option value="edt" selected>SDF por EDT das máscaras (embutido)</option>
+          <option value="net">Rede SynthDist — requer models/synthsurf</option>
+        </select>
+      </div>
       <button class="btn" id="run-surf" disabled>Reconstruir superfícies</button>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="show-surf" disabled> Mostrar 3D no visualizador</label>
-      <p class="note">A partir da parcelação DKT: malhas <b>white/pial</b> por hemisfério
-      (análogo navegador do <code>recon-surf</code>: <code>mri_mc</code> + <code>mris_smooth</code> +
-      <code>sample_parc</code>), pial colorida pelas parcelas, e <b>espessura</b> por pareamento
-      branca↔pial (Fischl &amp; Dale 2000) — aproximação para morfometria por região; não é o
-      <code>mris_place_surface</code> do FreeSurfer.</p>
+      <p class="note">Fluxo do <code>recon-all-clinical</code>: máscaras <code>wm.seg</code>/<code>filled</code>
+      pelas regras do <code>mri_synth_surf</code> → SDFs white/pial (rede SynthDist se instalada —
+      veja <code>licenses/synthsurf.txt</code> — ou EDT das máscaras) → colocação pela energia do
+      artigo (λ₁=6·10⁻⁴, λ₂=2·10⁻⁴, nsmooth 5) → <b>espessura Fischl &amp; Dale</b> (teto 5 mm) +
+      χ de Euler como QC + <code>talairach.xfm</code> + norm sintético. Sem
+      <code>mris_fix_topology</code>/<code>sphere.reg</code>: defeitos são relatados e as parcelas
+      vêm da amostragem volumétrica DKT.</p>
     </section>
 
     <section class="step about">
@@ -221,9 +231,10 @@
       <section class="panel" id="surf-panel" hidden>
         <h3>Superfície cortical — espessura e área</h3>
         <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Espessura por pareamento das superfícies branca↔pial (média dos dois sentidos,
-        Fischl &amp; Dale 2000) sobre a parcelação DKT — aproximação (não é o
-        <code>mris_place_surface</code>); área da malha pial suavizada.</p>
+        <p class="note">Fluxo recon-all-clinical: superfícies colocadas nas SDFs white/pial
+        (energia do artigo, λ₁/λ₂ de Dale 1999), espessura por pareamento branca↔pial
+        (Fischl &amp; Dale 2000, teto 5 mm), área regional medida na white (como o
+        <code>aparc.stats</code>); χ de Euler relatado como QC de topologia.</p>
       </section>
 
       <section class="panel" id="norm-panel" hidden>
@@ -257,6 +268,8 @@
         <button class="btn sm" data-export="nii-synthsr" disabled>MP-RAGE sintético</button>
         <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
+        <button class="btn sm" data-export="nii-norm" disabled title="Imagem sintética de córtex super-resolvido derivada das SDFs (norm.mgz do recon-all-clinical)">Norm sintético</button>
+        <button class="btn sm" data-export="xfm" disabled title="Transformada linear para o MNI por casamento de centros de massa (talairach.xfm)">talairach.xfm</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
         <button class="btn sm" data-export="errlog" disabled title="Registro dos erros desta máquina (contexto completo para diagnóstico e reprocessamento)">Log de erros</button>
       </div>
