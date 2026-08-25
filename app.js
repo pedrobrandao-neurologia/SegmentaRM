@@ -3,12 +3,12 @@
 // (padrão: conformação | robusto: reamostragem cúbica + correção de viés → conformação)
 // → segmentação (worker brainchop, tfjs) → estatísticas → exportações e coorte.
 
-import { Niivue, NVImage, SLICE_TYPE } from './vendor/niivue.js'
+import { Niivue, NVImage, NVMesh, SLICE_TYPE } from './vendor/niivue.js'
 import { Dcm2niix } from './vendor/dcm2niix/index.jpeg.js'
 import { inferenceModelsList, brainChopOpts } from './brainchop/brainchop-parameters.js'
 import { assessQuality } from './lib/quality.js'
 import { computeStats, statsToCSV, statsToJSON, statsToWideRow } from './lib/stats.js'
-import { GROUP_PT } from './lib/labels.js'
+import { GROUP_PT, ptNameOf } from './lib/labels.js'
 import { writeNifti, gzipBuffer } from './lib/nifti-writer.js'
 import { tableToSav } from './lib/sav.js'
 import { buildReport } from './lib/report.js'
@@ -51,6 +51,7 @@ const state = {
   norms: null,
   native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
+  surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
   wl: null,            // janela de exibição atual { min, max } do volume base
   wlRange: 255,        // amplitude de referência (p99−p1) para escalar o arrasto
   rebuilding: false,
@@ -424,7 +425,12 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.stats = null
   state.native = null
   state.bet = null
+  state.surf = null
   $('run-dkt').disabled = true
+  $('run-surf').disabled = true
+  $('show-surf').disabled = true
+  $('show-surf').checked = false
+  $('surf-panel').hidden = true
   state.sidecar = sidecar || null
   state.inputDesc = desc
   state.wl = null
@@ -765,6 +771,12 @@ async function runDktStep () {
     state.segKind = prevKind + '-dkt'
     state.modelUsed = `${src.pt} + parcelação DKT ${parcName === 'rede DKT brainchop' ? '(rede brainchop)' : `(${parcName})`}`
     log(`Fusão DKT: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais.`, 'ok')
+    state.surf = null
+    await showSurfaces(false)
+    $('run-surf').disabled = false
+    $('show-surf').disabled = true
+    $('show-surf').checked = false
+    $('surf-panel').hidden = true
     await applySegmentationResult(src.labels, src.colormap)
   } catch (e) {
     log(`Erro no passo DKT — o resultado ${src.pt} permanece intacto: ` + e.message, 'err')
@@ -774,6 +786,96 @@ async function runDktStep () {
     state.running = false
     $('run').disabled = false
   }
+}
+
+
+// ---------- passo 05: superfícies corticais (análogo navegador do recon-surf) ----------
+async function runSurfStep () {
+  if (state.running) return
+  if (!state.seg || !/-dkt$/.test(state.segKind)) {
+    log('As superfícies partem de um resultado com parcelação DKT — rode o passo 04 antes.', 'err')
+    return
+  }
+  state.running = true
+  $('run-surf').disabled = true
+  $('run').disabled = true
+  try {
+    log('Reconstruindo superfícies white/pial por hemisfério (surface nets + Taubin; espessura por EDT)…')
+    const r = await new Promise((resolve, reject) => {
+      const w = new Worker('./workers/surface.worker.js', { type: 'module' })
+      w.onmessage = (ev) => {
+        const m = ev.data
+        if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.1 + m.frac * 0.85) }
+        else if (m.cmd === 'done') { w.terminate(); resolve(m) }
+        else if (m.cmd === 'error') { w.terminate(); reject(new Error(m.message)) }
+      }
+      w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'falha no worker de superfícies')) }
+      w.postMessage({
+        seg: new Uint8Array(state.seg),
+        dims: dimsOf(state.conformed),
+        affine: affineOf(state.conformed).flat(),
+        labels: state.labelsMap,
+        colormap: state.colormap,
+        voxVol: voxVolOf(state.conformed)
+      })
+    })
+    for (const reg of r.stats) reg.pt = ptNameOf(reg.name)
+    state.surf = { meshes: r.meshes, stats: r.stats }
+    renderSurfStats()
+    $('show-surf').disabled = false
+    $('show-surf').checked = true
+    await ensureViewerAlive()
+    await showSurfaces(true)
+    log(`Superfícies prontas: ${r.meshes.length} malhas, ${r.stats.length} regiões com espessura/área.`, 'ok')
+    progress(0)
+  } catch (e) {
+    log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
+    progress(0)
+  } finally {
+    state.running = false
+    $('run').disabled = false
+    $('run-surf').disabled = false
+  }
+}
+
+// mostra/esconde as malhas pial (coloridas por parcela DKT) no visualizador
+async function showSurfaces (on) {
+  const nv = state.nv
+  if (!nv) return
+  try {
+    while (nv.meshes && nv.meshes.length) nv.removeMesh(nv.meshes[0])
+    if (on && state.surf) {
+      for (const m of state.surf.meshes) {
+        if (m.kind !== 'pial') continue
+        const file = new File([m.mz3], m.name + '.mz3')
+        const mesh = await NVMesh.loadFromFile({ file, gl: nv.gl, name: m.name + '.mz3' })
+        nv.addMesh(mesh)
+      }
+      // o render volumétrico oclui as malhas: esconde os volumes enquanto o 3D está ativo
+      for (let i = 0; i < nv.volumes.length; i++) nv.setOpacity(i, 0)
+      $('slicetype').value = 'render'
+      applySliceType()
+    } else {
+      if (nv.volumes.length > 0) nv.setOpacity(0, 1)
+      if (nv.volumes.length > 1) nv.setOpacity(1, (+$('opacity').value) / 100)
+      $('slicetype').value = 'multi'
+      applySliceType()
+    }
+    nv.drawScene()
+  } catch (e) {
+    log('Não consegui exibir as malhas: ' + e.message, 'err')
+  }
+}
+
+function renderSurfStats () {
+  if (!state.surf) return
+  const tb = $('surf-table')
+  const fmt = (x, d = 2) => (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  tb.querySelector('thead').innerHTML = '<tr><th>Região</th><th>H</th><th>Esp (mm)</th><th>Área (cm²)</th><th>Vol (cm³)</th></tr>'
+  tb.querySelector('tbody').innerHTML = state.surf.stats.map(r =>
+    `<tr><td>${(r.pt || r.base).replace(/ — (esquerd|direit)[oa]$/, '')}</td><td>${r.hemi}</td>` +
+    `<td>${fmt(r.thickAvg)} ± ${fmt(r.thickStd)}</td><td>${fmt(r.area_mm2 / 100, 1)}</td><td>${fmt(r.volume_mm3 / 1000, 1)}</td></tr>`).join('')
+  $('surf-panel').hidden = false
 }
 
 async function runSegmentation () {
@@ -851,7 +953,13 @@ async function runSegmentation () {
     }
     state.seg = seg
     state.segKind = kind
+    state.surf = null
+    await showSurfaces(false)
     $('run-dkt').disabled = !DKT_SOURCES[kind]
+    $('run-surf').disabled = true
+    $('show-surf').disabled = true
+    $('show-surf').checked = false
+    $('surf-panel').hidden = true
     await applySegmentationResult(labelsPath, colormapPath)
   } catch (e) {
     log('Erro: ' + e.message, 'err')
@@ -1036,6 +1144,7 @@ function metaNow () {
     quality: state.quality,
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
+    surf: state.surf ? { regioes: state.surf.stats } : null,
     preproc: {
       nativo: state.native ? state.native.prov : null,
       extracaoCerebral: state.bet
@@ -1150,6 +1259,9 @@ async function handleExport (kind) {
           { name: `${sub}_segmentacao.nii.gz`, data: new Uint8Array(await ex.niiSeg()) },
           { name: `${sub}_conformado.nii.gz`, data: new Uint8Array(await ex.niiConf()) }
         ]
+        if (state.surf) {
+          for (const m of state.surf.meshes) files.push({ name: `${sub}_${m.name}.mz3`, data: new Uint8Array(m.mz3) })
+        }
         if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
         if (state.bet) {
           files.push({ name: `${sub}_mascara.nii.gz`, data: new Uint8Array(await ex.niiMask()) })
@@ -1270,6 +1382,8 @@ function wireInputs () {
 
   $('run').onclick = runSegmentation
   $('run-dkt').onclick = runDktStep
+  $('run-surf').onclick = runSurfStep
+  $('show-surf').onchange = () => showSurfaces($('show-surf').checked)
   $('bet-f').oninput = () => { $('bet-f-out').textContent = (+$('bet-f').value).toFixed(2) }
   $('opacity').oninput = () => {
     const nv = state.nv
