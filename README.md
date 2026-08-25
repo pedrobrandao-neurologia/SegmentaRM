@@ -1,16 +1,46 @@
 # SegmentaRM
 
-PWA que converte **DICOM**, segmenta o encéfalo e calcula **volumetria por estrutura**
-inteiramente no navegador — nenhuma imagem sai do dispositivo. Construído no espírito do
-[brainchop](https://github.com/neuroneural/brainchop) e do
-[brain2print](https://github.com/niivue/brain2print), mas orientado a relatório volumétrico:
-**aparc+aseg com hemisférios, cerebelo (córtex/substância branca E/D), tronco encefálico e
-corpo caloso**, com exportação em **CSV, JSON, SPSS (.sav), PDF e NIfTI**.
+PWA de **segmentação e morfometria cerebral 100% no navegador** — nenhuma imagem sai do
+dispositivo, nenhum servidor, nenhuma instalação. Converte **DICOM**, segmenta com a rede
+**SynthSeg original** ou com os modelos MeshNet do brainchop, aplica a **parcelação DKT da
+FastSurferCNN**, reconstrói **superfícies corticais** com espessura/área por região, compara
+os volumes com as **curvas normativas dos brain charts** por idade e sexo, e exporta tudo em
+**CSV, JSON, SPSS (.sav), PDF, NIfTI, malhas .mz3 e pacote .zip**.
 
 > **Uso em pesquisa e ensino.** Não é dispositivo médico, não tem registro ANVISA e não
 > substitui leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
 
 ---
+
+## O fluxo
+
+```
+Pasta DICOM ──▶ triagem por série (cabeçalhos) ──▶ leitura direta ou dcm2niix (WASM) ──┐
+Arquivo .nii/.nii.gz ──────────────────────────────────────────────────────────────────┤
+                                        ▼
+                 01 · Exame  (identificação, idade e sexo p/ o normativo)
+                                        ▼
+                 02 · Qualidade — régua A–D + pré-processamento estilo FSL
+                     reorientação RAS · recorte de pescoço · correção de viés ·
+                     extração cerebral (BET-like, f ajustável) · normalização
+                     (nível C/D aciona também o ramo robusto: reamostragem cúbica)
+                                        ▼
+                     Conformação 256³ · 1 mm (estilo FreeSurfer, via NiiVue)
+                                        ▼
+                 03 · Segmentação — SynthSeg 1.0 (rede original) ou MeshNet (brainchop)
+                                        ▼
+                 04 · Parcelação DKT — FastSurferCNN (3 vistas) sobre a fita cortical
+                                        ▼
+                 05 · Superfícies — white/pial por hemisfério + espessura/área por região
+                                        ▼
+     Estatísticas: volumes, % do encéfalo, hemisférios, lobos, assimetria,
+     comparação normativa (percentil/z por idade e sexo) e tabela estilo aparc.stats
+                                        ▼
+         CSV · JSON · SPSS .sav · PDF · NIfTI (.nii.gz) · malhas .mz3 · .zip · coorte
+```
+
+Cada passo é independente: um erro na parcelação ou nas superfícies **nunca** descarta o
+resultado anterior.
 
 ## Estudos DICOM grandes: triagem por série
 
@@ -20,189 +50,135 @@ lê apenas os cabeçalhos (~128 KB por arquivo, sem pixel data), agrupa por
 de 4.000 arquivos vira a conversão de uma série de 200. Cada série selecionada é
 processada **uma por vez** (o pico de memória é o de uma série, não o do estudo), e
 séries não comprimidas (Little Endian) são montadas **corte a corte direto em NIfTI**,
-sem passar pelo conversor WASM — mais rápido e com alocação mínima; as demais vão pelo
-dcm2niix só com os arquivos daquela série. Isso elimina o `ArrayBuffer allocation failed`
-em máquinas com pouca memória. Mecanismo portado do
-[LUME](https://github.com/pedrobrandao-neurologia/LUME), do mesmo autor
-(`lib/dicom-scan.js`).
+sem passar pelo conversor WASM; as demais vão pelo dcm2niix só com os arquivos daquela
+série. Isso elimina o `ArrayBuffer allocation failed` em máquinas com pouca memória.
+Mecanismo portado do [LUME](https://github.com/pedrobrandao-neurologia/LUME), do mesmo
+autor (`lib/dicom-scan.js`).
 
-## O fluxo
+## Pré-processamento estilo FSL (portado do Morfo Studio)
 
-```
-Pasta DICOM ──dcm2niix (WASM)──▶ NIfTI ──┐
-Arquivo .nii/.nii.gz ────────────────────┤
-                                         ▼
-                       Régua de qualidade (A–D)
-                       voxel · anisotropia · nº de cortes · FOV · contraste · campo
-                                         ▼
-              ┌── nível A/B ── pipeline padrão (conformação direta)
-              └── nível C/D ── pipeline robusto:
-                    reamostragem cúbica Catmull-Rom → isotrópico 1 mm
-                    correção homomórfica de campo de viés
-                    suavização leve (opcional)
-                                         ▼
-                    Conformação 256³ · 1 mm (estilo FreeSurfer, via NiiVue)
-                                         ▼
-                    Segmentação — worker brainchop (MeshNet, TensorFlow.js)
-                                         ▼
-        Estatísticas: volumes, % do encéfalo, hemisférios, lobos, índice de assimetria
-                                         ▼
-            CSV · JSON · SPSS .sav · PDF · NIfTI (.nii.gz) · pacote .zip · coorte
-```
-
-### SynthSeg de verdade, no navegador
-
-A opção **SynthSeg 1.0** roda a **rede original** de Billot, Iglesias e colaboradores
-([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): os pesos oficiais
-`synthseg_1.0.h5` foram convertidos para TensorFlow.js com
-`tools/convert_synthseg1_tfjs.py` (arquitetura reconstruída camada a camada a partir de
-`ext/neuron/models.py`; paridade numérica verificada — argmax concorda em 99,99% com o
-Keras, Δ máximo de posterior 0,004 com quantização float16, 27 MB).
-
-O pré-processamento segue o `predict.py` deles: alinhamento a RAS, rescale robusto por
-percentis 0,5–99,5 e grade de 1 mm (a conformação 256³ do app). **Diferenças declaradas**
-desta versão web: a inferência roda em **blocos com sobreposição** (o volume inteiro não
-cabe na memória de GPU do navegador; stitching por recorte central), e ainda não há
-test-time flipping nem suavização de posteriors. É isso que dá o caráter
-contraste/resolução-agnóstico do método — a rede é a mesma do `mri_synthseg`.
-
-Duas camadas ausentes no tfjs foram implementadas em `lib/tfjs-upsampling3d.js`
-(UpSampling3D por repetição e BatchNorm congelado para rank 5).
-
-### Parcelação cortical DKT — agora com o FastSurfer de verdade
-
-A parcelação DKT é um **passo separado** (04 · Parcelação DKT), aplicado sobre um resultado
-**SynthSeg** ou **Subcortical 18 (aseg compacta)** já pronto — se algo falhar, a segmentação
-feita permanece intacta e não é preciso reprocessar. A fusão replica o `--parc` do
-SynthSeg 2.0 (`predict_synthseg.py`: `seg[mask de córtex] = parcelação[mask]`), com
-propagação modal por vizinhança para voxels sem parcela (`lib/dkt-fusion.js`).
-
-A **fonte recomendada** da parcelação é a **FastSurferCNN**
-([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et al.,
-*NeuroImage* 2020) — os **checkpoints oficiais v1** (axial/coronal/sagital,
-`Epoch_30_training_state.pkl`) convertidos para tfjs float16 com as BatchNorm dobradas
-(`tools/convert_fastsurfer_tfjs.py`, 3,6 MB por vista; paridade numérica verificada:
-argmax concorda em 99,98% com a referência, em fatias reais). É exatamente a rede
-volumétrica cujo `aparc.DKTatlas+aseg` o **recon-surf** depois refina em superfícies —
-o recon-surf em si (malhas, registro esférico, binários C++ do FreeSurfer, horas de CPU)
-**não é executável no navegador**; o que se embarca é a parcelação volumétrica que o
-alimenta. A inferência replica o `fastsurfer_inference` v1: fatias espessas de 7 cortes,
-**agregação de vistas** (0,4·axial + 0,4·coronal + 0,2·sagital, em logits), restrita à
-fita cortical da segmentação-fonte (por isso cabe na memória do navegador); as 19 regiões
-que a v1 não lateraliza são atribuídas por componente conexo contra a linha média
-(adaptação do fix por centroide de substância branca do pipeline oficial). Há uma opção
-**axial+coronal** (mais rápida, pesos renormalizados) e a rede DKT do brainchop continua
-disponível como alternativa.
-
-No SynthSeg, o hemisfério do córtex vem da própria segmentação (E=2/D=19, a autoridade,
-como no mascaramento oficial); na aseg compacta o córtex é bilateral e o hemisfério vem
-da parcelação. Estruturas ausentes num sujeito são aceitas — contagem menor de rótulos é
-aviso, não erro.
-
-### Superfícies corticais (passo 05) — o análogo navegador do recon-surf
-
-Sobre um resultado com parcelação DKT, o passo **05 · Superfícies** reconstrói as malhas
-**white** e **pial** por hemisfério e calcula a tabela estilo `aparc.stats` — **espessura
-média ± dp, área pial e volume por região DKT** — no inspetor, no PDF, no CSV, no JSON,
-no `.sav` (colunas `thick_*`/`surfarea_*`) e no `.zip` (malhas `.mz3`). A pial aparece
-**no painel central**, colorida pelas parcelas (chave "Mostrar 3D").
-
-O mapeamento honesto com o `recon-surf` do FastSurfer (que continua sendo binário
-FreeSurfer, horas de CPU, e **não roda em navegador**):
-
-| recon-surf | Aqui (`lib/surfaces.js`, Web Worker) |
-|---|---|
-| `mri_fill` (separar hemisférios, fechar SB) | máscaras white/pial por hemisfério a partir dos rótulos + fechamento morfológico, maior componente e cavidades |
-| `mri_mc` / `mri_tessellate` | **surface nets** sobre a máscara (malha fechada, 2-variedade; validada em esfera: volume −0,6%) |
-| `mris_smooth` | **suavização de Taubin** λ\|μ, que não encolhe (área da esfera a +0,2% do analítico) |
-| `sample_parc` (rótulos DKT volume→superfície) | parcela por vértice amostrando o volume — mesma filosofia |
-| `mris_place_surface` → `?h.thickness` | **aproximação por transformada de distância**: espessura = d(córtex→SB) + d(córtex→fora da pial), EDT exata de Felzenszwalb (fantasma de casca de 3 mm: 2,78 ± 0,24) |
-| `mris_anatomical_stats` → `?h.aparc.stats` | espessura/área/volume por região na tabela e nas exportações |
-| `mris_sphere` + `mris_register` (`?h.sphere.reg`) | **não existe** — análise vertex-wise entre sujeitos continua exigindo o FreeSurfer/FastSurfer de verdade |
-
-As diferenças são declaradas no relatório: a espessura por EDT é uma aproximação de
-triagem (sem posicionamento sub-voxel de superfícies nem correção de topologia); o número
-de Euler das malhas aqui é o da máscara limpa, não um QC da tesselagem original.
-
-### Modelos embarcados (brainchop, licença MIT)
-
-| Opção na interface | Pasta | Classes |
-|---|---|---|
-| **Aparc+Aseg 104** (padrão) | `models/model21_104class` | Córtex Desikan-Killiany **por hemisfério**, subcortical E/D, **cerebelo córtex/SB E/D**, **tronco encefálico**, ventrículos, **corpo caloso em 5 segmentos** |
-| Aparc+Aseg 50 | `models/model30chan50cls` | Parcelação cortical + subcortical sem separar hemisférios |
-| Subcortical 18 | `models/model30chan18cls` | aseg compacta: tálamo, gânglios da base, hipocampo, amígdala, cerebelo, tronco |
-| Tecidos | `models/model20chan3cls` | Cinzenta / branca |
-| Máscara encefálica | `models/model5_gw_ae` / `model11_gw_ae` | Skull stripping |
-
-Cada modelo tem variantes de memória normal/baixa (convolução sequencial na última camada).
-A primeira execução baixa <1 MB de pesos; o service worker guarda tudo e o aplicativo
-funciona **offline** depois disso.
-
-### Pré-processamento estilo FSL (portado do Morfo Studio)
-
-A seção **02 · Qualidade** expõe os equivalentes navegador das etapas estruturais clássicas
-do FSL (`lib/fsl-prep.js`, portado de
-[MorfoStudio](https://github.com/pedrobrandao-neurologia/MorfoStudio)), nesta ordem — as
-etapas nativas rodam em Web Worker antes da conformação, e a imagem corrigida alimenta
-todo o resto:
+A seção **02 · Qualidade** expõe os equivalentes navegador das etapas estruturais
+clássicas do FSL (`lib/fsl-prep.js`, portado do
+[MorfoStudio](https://github.com/pedrobrandao-neurologia/MorfoStudio)) — as etapas
+nativas rodam em Web Worker antes da conformação, e a imagem corrigida alimenta todo o
+resto:
 
 | Etapa | Equivalente FSL | Como funciona aqui |
 |---|---|---|
-| Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo (a conformação já reorientava implicitamente; agora é explícito e testável) |
-| Recorte de pescoço | `robustfov` | heurística no perfil de área de primeiro plano (Otsu) do eixo S-I detectado pela affine; mantém 170 mm do topo da cabeça |
-| Correção de viés | `N4`-like | correção homomórfica existente, garantida **antes** da extração cerebral |
-| Extração cerebral | `BET` | modelo MeshNet de máscara com **probabilidade** (softmax via `isScalar`), limiar **f configurável** (0,1–0,9; maior = máscara menor), fechamento morfológico, maior componente 26-conexo e preenchimento de cavidades — a máscara é **sobreposta no visualizador** para inspeção e a rede recebe só o cérebro |
-| Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara; a segmentação de tecidos (modelo Tecidos) dá SC/SB/líquor no painel |
+| Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo |
+| Recorte de pescoço | `robustfov` | perfil de área de primeiro plano (Otsu) no eixo S-I detectado pela affine; mantém 170 mm do topo |
+| Correção de viés | `N4`-like | correção homomórfica, garantida **antes** da extração cerebral |
+| Extração cerebral | `BET` | modelo de máscara em modo probabilidade, limiar **f configurável**, fechamento + maior componente + cavidades; máscara sobreposta para inspeção; a rede recebe só o cérebro |
+| Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara |
 
-Os intermediários saem nos botões de exportação (**pré-processado nativo, máscara e cérebro
-extraído** em `.nii.gz`, também no pacote `.zip`) e o JSON registra a **proveniência**
-(`preprocessamento`: etapas aplicadas e parâmetros).
+Os intermediários (pré-processado nativo, máscara, cérebro extraído) saem em `.nii.gz` e
+no `.zip`; o JSON registra a **proveniência** (`preprocessamento`). O
+[niimath](https://github.com/rordenlab/niimath) WASM foi avaliado e não integrado (não tem
+`fslreorient2std` nem BET; a morfologia já existia em JS) — segue como opção natural para
+um `fslmaths` genérico. **Limitações declaradas**: recorte heurístico ≠ robustfov exato;
+extração por rede ≠ superfície deformável do BET; mascarar/normalizar muda o domínio visto
+pelos MeshNet — compare com e sem as opções.
 
-**Sobre o niimath** (avaliado antes de reimplementar): o
-[niimath](https://github.com/rordenlab/niimath) WASM (~723 KB, BSD-2) tem `-robustfov`
-exato, mas **não** tem `fslreorient2std` (o `-conform` dele reamostra) nem BET — como a
-reorientação teria de ser JS de qualquer forma e a morfologia já existia, ficou tudo em
-JS puro (~150 linhas), sem custo de download. O niimath continua sendo a opção natural
-se um dia for preciso um `fslmaths` genérico.
+## Segmentação (passo 03)
 
-**Limitações declaradas**: o recorte é heurístico (≠ robustfov exato); a extração usa a
-rede de máscara do brainchop (≠ superfície deformável do BET); mascarar/normalizar muda o
-domínio visto pelos MeshNet, que foram treinados em cabeça inteira conformada — use a
-sobreposição de QC e compare com e sem as opções. O SynthSeg tolera entrada com ou sem
-crânio por natureza.
+### SynthSeg de verdade, no navegador
+
+A opção padrão **SynthSeg 1.0** roda a **rede original** de Billot, Iglesias e
+colaboradores ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): os
+pesos oficiais `synthseg_1.0.h5` convertidos para TensorFlow.js com
+`tools/convert_synthseg1_tfjs.py` (paridade numérica verificada — argmax concorda em
+99,99% com o Keras; float16, 27 MB). O pré-processamento segue o `predict.py` oficial
+(RAS, rescale robusto 0,5–99,5, 1 mm). **Diferenças declaradas**: inferência em blocos
+com sobreposição (stitching por recorte central), sem test-time flipping nem suavização
+de posteriors. Duas camadas ausentes no tfjs foram implementadas em
+`lib/tfjs-upsampling3d.js`.
+
+### Modelos MeshNet embarcados (brainchop, MIT)
+
+| Opção na interface | Pasta | Classes |
+|---|---|---|
+| Aparc+Aseg 104 | `models/model21_104class` | DKT por hemisfério, subcortical E/D, cerebelo córtex/SB E/D, tronco, caloso em 5 segmentos |
+| Aparc+Aseg 50 | `models/model30chan50cls` | parcelação sem separar hemisférios |
+| Subcortical 18 | `models/model30chan18cls` | aseg compacta |
+| Tecidos / Tecidos leve | `models/model20chan3cls` | cinzenta / branca |
+| Máscara encefálica | `models/model5_gw_ae` / `model11_gw_ae` | skull stripping (também usado pelo BET) |
+
+Todos com variantes de memória normal/baixa. A primeira execução baixa os pesos; o
+service worker guarda tudo e o aplicativo funciona **offline** depois disso.
 
 ### O modo robusto não é o SynthSR
 
-Quando a régua marca C/D (FLAIR axial de 5 mm, poucos cortes, baixo campo), o ramo robusto
-aplica métodos **clássicos** — reamostragem cúbica, correção homomórfica de viés — inspirados
-no *papel* do SynthSR dentro do `recon-all-clinical`, mas sem a rede: reamostrar não cria
-informação. O relatório e o JSON registram o nível de qualidade e o pipeline usado; para
-inferência individual em exame anisotrópico, seja conservador.
+Quando a régua marca C/D, o ramo robusto aplica métodos **clássicos** (reamostragem
+cúbica, correção de viés) inspirados no *papel* do SynthSR dentro do
+`recon-all-clinical`, mas sem a rede: reamostrar não cria informação. Para inferência
+individual em exame anisotrópico, seja conservador.
 
----
+## Parcelação cortical DKT (passo 04) — com o FastSurfer de verdade
 
-### Comparação normativa (QC, não clínico)
+Passo separado sobre um resultado **SynthSeg** ou **aseg compacta** pronto — se falhar, a
+segmentação permanece intacta. A fusão replica o `--parc` do SynthSeg 2.0
+(`seg[máscara de córtex] = parcelação[máscara]`, com propagação modal por vizinhança —
+`lib/dkt-fusion.js`).
 
-Informando **idade e sexo**, o aplicativo compara os volumes com as curvas populacionais dos
+A **fonte recomendada** é a **FastSurferCNN**
+([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et
+al., *NeuroImage* 2020): os **checkpoints oficiais v1** (axial/coronal/sagital)
+convertidos para tfjs float16 com BatchNorm dobrada (`tools/convert_fastsurfer_tfjs.py`,
+3,6 MB por vista; paridade de argmax 99,98% com a referência em fatias reais). É a rede
+volumétrica cujo `aparc.DKTatlas+aseg` o recon-surf refina — a inferência replica o
+pipeline v1 (fatias espessas de 7 cortes, agregação 0,4·axial + 0,4·coronal +
+0,2·sagital em logits), **restrita à fita cortical** (por isso cabe na memória do
+navegador); as regiões que a v1 não lateraliza são atribuídas por componente conexo
+contra a linha média. Há a opção **axial+coronal** (mais rápida) e a rede DKT do
+brainchop como alternativa. Estruturas ausentes num sujeito são aceitas — contagem menor
+de rótulos é aviso, não erro.
+
+## Superfícies corticais (passo 05) — o análogo navegador do recon-surf
+
+Sobre um resultado com parcelação DKT, reconstrói as malhas **white** e **pial** por
+hemisfério e calcula a tabela estilo `aparc.stats` — **espessura média ± dp, área pial e
+volume por região DKT** — no inspetor e em todas as exportações. A pial aparece **no
+painel central**, colorida pelas parcelas (chave "Mostrar 3D"). O mapeamento honesto com
+o `recon-surf` (que continua sendo binário FreeSurfer, horas de CPU, e **não roda em
+navegador**):
+
+| recon-surf | Aqui (`lib/surfaces.js`, Web Worker, segundos) |
+|---|---|
+| `mri_fill` | máscaras white/pial por hemisfério + fechamento, maior componente, cavidades |
+| `mri_mc` / `mri_tessellate` | **surface nets** (malha fechada 2-variedade; esfera-teste: volume −0,6%) |
+| `mris_smooth` | **Taubin** λ\|μ, que não encolhe (área da esfera a +0,2% do analítico) |
+| `sample_parc` | parcela por vértice amostrando o volume — mesma filosofia do FastSurfer |
+| `mris_place_surface` → thickness | **aproximação por EDT exata**: d(córtex→SB) + d(córtex→fora da pial) (fantasma de 3 mm: 2,78 ± 0,24) |
+| `mris_anatomical_stats` | espessura/área/volume por região |
+| `mris_sphere` + `mris_register` | **não existe** — análise vertex-wise entre sujeitos exige o FreeSurfer/FastSurfer reais |
+
+A espessura por EDT é aproximação de triagem (sem posicionamento sub-voxel nem correção
+de topologia), declarada no relatório.
+
+## Comparação normativa (QC, não clínico)
+
+Informando **idade e sexo**, os volumes são comparados com as curvas populacionais dos
 **brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
-[brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e vendorizados
-em `models/normative/brainchart.json`): **percentil e z-score do valor previsto** para volumes
-globais (GMV, WMV, cinzenta subcortical, ventrículos, cérebro total), **volume cortical por
-lobo** (frontal, parietal, temporal, occipital, ínsula, cíngulo — E/D e total, após o passo DKT)
-e parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 é sinalizado como possível
-erro de segmentação** no painel e no PDF (banner "verificar segmentação"). As normas foram
-ajustadas em volumes FreeSurfer harmonizados; os volumes daqui vêm do SynthSeg/DKT — a
-comparação é uma aproximação para triagem/QC, não para uso clínico.
+[brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e
+vendorizados em `models/normative/brainchart.json`): **percentil e z-score do previsto**
+para volumes globais, **volume cortical por lobo** (E/D e total, após o passo DKT) e
+parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 vira alerta de possível
+erro de segmentação** no painel e no PDF. As normas foram ajustadas em volumes FreeSurfer;
+os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clínico.
 
 ## Exportações
 
-- **CSV** longo (uma linha por estrutura/agregado/assimetria; separador decimal configurável para Excel pt-BR ou R/Python)
-- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria, qualidade, ressalvas)
-- **SPSS `.sav`** — escritor próprio de system file com nomes longos (registro 7/13), rótulos de variável em português com acentos (UTF-8) e missing como sysmis; abre no SPSS, `haven::read_sav()` e `pyreadstat`
-- **PDF** — relatório com captura do visualizador, régua de qualidade, agregados, tabela por estrutura, escada de assimetria e página de métodos
-- **NIfTI** — segmentação e volume conformado em `.nii.gz`
-- **Pacote `.zip`** com tudo
-- **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav` para SPSS/R
+- **CSV** longo (estrutura/agregado/lobo/assimetria/superfície; decimal configurável)
+- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria,
+  qualidade, proveniência do pré-processamento, normativo, superfície, ressalvas)
+- **SPSS `.sav`** — escritor próprio (nomes longos, rótulos em português UTF-8), incluindo
+  `thick_*`/`surfarea_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
+- **PDF** — capa com captura e banner de QC, comparação normativa com réguas de percentil,
+  lobos, estruturas, assimetria, superfície cortical e página de métodos
+- **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, máscara,
+  cérebro extraído) em `.nii.gz`
+- **Malhas** — white/pial em `.mz3` dentro do `.zip`
+- **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav`
 
 ### Usar no R
 
@@ -225,44 +201,69 @@ python3 -m http.server 8080     # http://localhost:8080
 **GitHub Pages:** o repositório é 100% estático — ative Pages na branch e pronto.
 Tudo (NiiVue, dcm2niix WASM, TensorFlow.js, modelos, fontes) está vendorizado; não há CDN.
 
-O botão **Exemplo** carrega um T1 real 256³ (do brain2print, MIT) para demonstrar o fluxo completo.
+O botão **Exemplo** carrega um T1 real 256³ (do brain2print, MIT) para demonstrar o fluxo.
+Após uma atualização do aplicativo, recarregue a página duas vezes (o service worker troca
+o cache na segunda visita).
 
 ## Estrutura
 
 ```
-index.html · styles.css · app.js     interface e orquestração
-lib/quality.js                       régua de qualidade A–D
-lib/stats.js · lib/labels.js         volumetria, hemisférios, lobos, assimetria, nomes em pt-BR
-lib/sav.js                           escritor SPSS .sav
-lib/pdf.js · lib/report.js           gerador de PDF e relatório
-lib/nifti-writer.js · lib/zip.js     NIfTI-1 e ZIP
-workers/preprocess.worker.js         modo robusto (reamostragem cúbica + correção de viés)
-brainchop/                           worker de inferência do brain2print (MIT), tfjs vendorizado
-models/                              pesos MeshNet do brainchop (MIT)
-vendor/                              NiiVue, dcm2niix WASM, TensorFlow.js, fontes
-tools/convert_synthseg.py            conversor Keras→ONNX da iteração anterior (opcional)
-sw.js · manifest.webmanifest         PWA offline
+index.html · styles.css · app.js       interface e orquestração
+lib/quality.js                         régua de qualidade A–D
+lib/dicom-scan.js                      triagem DICOM por série + leitura direta (do LUME)
+lib/fsl-prep.js                        reorientação RAS, robustfov, morfologia, normalização
+lib/synthseg-core.js                   pré/pós-processamento e tiles do SynthSeg
+lib/tfjs-upsampling3d.js               camadas 3D ausentes no tfjs
+lib/fastsurfer-core.js                 FastSurferCNN v1 (forward, vistas, LIA, agregação)
+lib/dkt-fusion.js                      fusão parcelação→córtex (esquema do predict_synthseg)
+lib/surfaces.js                        EDT, surface nets, Taubin, áreas, MZ3
+lib/normative.js                       percentil/z contra os brain charts
+lib/stats.js · lib/labels.js           volumetria, lobos, assimetria, nomes em pt-BR
+lib/sav.js · lib/pdf.js · lib/report.js  SPSS, PDF e relatório
+lib/nifti-writer.js · lib/zip.js       NIfTI-1 e ZIP
+workers/preprocess.worker.js           etapas nativas (FSL-like + ramo robusto)
+workers/mask.worker.js                 limpeza da máscara cerebral (BET-like)
+workers/synthseg.worker.js             inferência SynthSeg em blocos
+workers/fastsurfer.worker.js           parcelação FastSurferCNN por vistas
+workers/surface.worker.js              superfícies e espessura
+brainchop/                             worker de inferência do brain2print (MIT)
+models/synthseg1/                      SynthSeg 1.0 em tfjs f16 (27 MB) + rótulos
+models/fastsurfer/                     FastSurferCNN v1 f16 (3×3,6 MB) + manifesto
+models/normative/brainchart.json       curvas normativas vendorizadas
+models/model*/                         MeshNet do brainchop (MIT)
+tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
+tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, sem torch)
+licenses/                              licenças e proveniência dos pesos
+vendor/                                NiiVue, dcm2niix WASM, TensorFlow.js, fontes
+sw.js · manifest.webmanifest           PWA offline
 ```
-
-## Limites
-
-- **Espessura cortical e superfícies** não estão aqui: dependem de geometria/topologia
-  (`recon-all-clinical`). Isto é volumetria.
-- **Memória/GPU**: a inferência usa WebGL; em GPUs integradas use os modelos compactos ou a
-  variante de memória baixa. CPU funciona, mas é lenta.
-- **DICOM**: o dcm2niix WASM embarcado decodifica também séries JPEG; séries muito exóticas
-  podem exigir conversão prévia no desktop.
-- Os modelos foram treinados em **T1**; T2/FLAIR degradam o resultado (a régua avisa).
 
 ## Interface
 
-Layout de estação de trabalho (inspirado no [Morfo Studio](https://github.com/pedrobrandao-neurologia/MorfoStudio)):
-barra superior com as ações de abertura, rail esquerdo com as etapas do pipeline,
-**visualizador ocupando o centro** com HUD sobreposto, inspetor à direita (exame,
-agregados, regiões, assimetria, exportação/coorte) e log de uma linha no rodapé.
-Tema escuro grafite/osso/vermelho-córtex com princípios das HIG da Apple: resposta no
-`pointer-down`, transições críticas curtas, materiais com hierarquia, e equivalentes para
+Layout de estação de trabalho (inspirado no
+[Morfo Studio](https://github.com/pedrobrandao-neurologia/MorfoStudio)): barra superior,
+rail esquerdo com os passos 01–05, **visualizador no centro** com HUD (janelamento
+automático por percentis + botão **"janela"** para ajuste manual por arrasto — ↔
+contraste, ↕ brilho, duplo clique volta ao automático), inspetor à direita e log no
+rodapé. O visualizador **se recupera sozinho de perda de contexto WebGL** (comum após
+inferência pesada na GPU — era a causa da tela branca). Tema escuro grafite/osso/
+vermelho-córtex com princípios das HIG da Apple e equivalentes para
 `prefers-reduced-motion`, `prefers-reduced-transparency` e `prefers-contrast: more`.
+
+## Limites
+
+- **Sem registro esférico** (`sphere.reg`): comparação vertex-wise entre sujeitos e QC por
+  número de Euler da tesselagem original exigem FreeSurfer/FastSurfer reais. A espessura
+  daqui é aproximação por EDT — boa para triagem por região, não para efeitos sutis.
+- **Memória/GPU**: a inferência usa WebGL; em GPUs integradas use os modelos compactos ou
+  memória baixa. CPU funciona, mas é lenta (SynthSeg/FastSurfer em CPU levam dezenas de
+  minutos). Em estudos DICOM grandes, use a triagem para abrir só o necessário.
+- **DICOM**: a leitura direta cobre séries Little Endian não comprimidas; JPEG etc. passam
+  pelo dcm2niix WASM; séries muito exóticas podem exigir conversão prévia.
+- Os modelos foram treinados em **T1** (o SynthSeg tolera outros contrastes por desenho);
+  a régua de qualidade avisa quando a entrada foge do domínio.
+- **Não misture pipelines na mesma coorte**: os volumes daqui têm vieses sistemáticos
+  próprios (como qualquer pipeline) — reprocesse todos os sujeitos do mesmo jeito.
 
 ## Créditos
 
@@ -275,8 +276,14 @@ Tema escuro grafite/osso/vermelho-córtex com princípios das HIG da Apple: resp
   oficiais do FastSurferCNN v1 convertidos para tfjs (`licenses/fastsurfer.txt`). Cite
   *FastSurfer — A fast and accurate deep learning based neuroimaging pipeline*
   (NeuroImage, 2020).
-- **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT): worker de inferência e modelos MeshNet.
+- **Brain charts** — Bethlehem, Seidlitz, White et al.
+  ([brainchart/Lifespan](https://github.com/brainchart/Lifespan)). Cite *Brain charts for
+  the human lifespan* (Nature, 2022).
+- **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT):
+  worker de inferência e modelos MeshNet.
 - **NiiVue** e **dcm2niix** — Rorden e colaboradores.
-- Linhagem conceitual: **SynthSeg / SynthSR / recon-all-clinical** — Billot, Gopinath, Iglesias
-  e colaboradores, Martinos Center (MGH/Harvard). Cite os artigos originais em trabalhos que
-  usem as segmentações.
+- **LUME** e **Morfo Studio** — projetos do mesmo autor; triagem DICOM e pré-processamento
+  FSL portados de lá.
+- Linhagem conceitual: **SynthSeg / SynthSR / recon-all-clinical** — Billot, Gopinath,
+  Iglesias e colaboradores, Martinos Center (MGH/Harvard). Cite os artigos originais em
+  trabalhos que usem as segmentações.
