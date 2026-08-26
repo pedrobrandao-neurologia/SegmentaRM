@@ -23,7 +23,9 @@ moving_variance em float32 — as estatísticas de BatchNorm alimentam
 Verificação da cópia (reproduzível):
   · 28/28 camadas com pesos casaram com a arquitetura lida do mri_synth_surf.py
   · 13.242.249 parâmetros; unet_likelihood com kernel (1,1,1,24,9) — os 9 canais
-    de SDF, dos quais o pipeline usa 0..3 (lh-white, lh-pial, rh-white, rh-pial)
+    de SDF, dos quais o pipeline usa 0..3 — MEDIDOS como 0 = lh-pial,
+    1 = lh-white, 2 = rh-pial, 3 = rh-white, o inverso do que os nomes das
+    variáveis do mri_synth_surf.py sugerem (ver README, seção do passo 05)
   · paridade tfjs × Keras: máx |Δ| = 7e-5 numa saída que varia de −65 a +22
 
 LICENÇA — LEIA ANTES DE REDISTRIBUIR

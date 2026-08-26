@@ -19,7 +19,7 @@ import { dilate6, erode6, largestComponent, fillCavities } from '../lib/fsl-prep
 import {
   signedSdfFromMask, hemispherePartition, accumulateSyntheticNorm, maskByDilatedSeg,
   buildNeighbors, eulerCharacteristic, trilinear, placeSurface, smoothMesh,
-  talairachFromSeg, talairachXfm
+  talairachFromSeg, talairachXfm, escolheCanaisSdf
 } from '../lib/sdf-surface.js'
 
 function post (frac, txt) { self.postMessage({ cmd: 'progress', frac, txt }) }
@@ -94,7 +94,7 @@ function permuteFromRAS (volRas, dimsRas, dims, map, Ctor = Float32Array) {
 // recorte à caixa do encéfalo + margem, blocos 96³ com sobreposição e recorte
 // central, 9 canais de saída (0..3 = SDFs dos dois hemisférios; a atribuição
 // white/pial é decidida pelo próprio exame — ver o bloco no fim desta função)
-async function netSdfs (img, seg, ctxMask, dims, affine, modelUrl, isGPU, tile) {
+async function netSdfs (img, seg, ctxE, ctxD, ctxMask, dims, affine, modelUrl, isGPU, tile) {
   const tf = await import('../vendor/tf.fesm.min.js')
   const { registerUpSampling3D } = await import('../lib/tfjs-upsampling3d.js')
   registerUpSampling3D(tf)
@@ -167,31 +167,14 @@ async function netSdfs (img, seg, ctxMask, dims, affine, modelUrl, isGPU, tile) 
     }
     return permuteFromRAS(full, rd, dims, map)
   })
-  // ORDEM DOS CANAIS. O mri_synth_surf.py nomeia `W = pred[...,0]` e `P = pred[...,1]`,
-  // mas a medicao nos pesos v10 mostra o contrario: no cortex (entre as duas
-  // superficies) o canal 0 fica NEGATIVO (dentro da pial) e o canal 1 POSITIVO (fora
-  // da white), e so a atribuicao W=canal 1 / P=canal 0 reproduz o perfil pretendido
-  // pela formula do norm sintetico (cortex 39,8 contra os 40 do alvo; a leitura
-  // literal da 63,9). Logo: 0 = lh-pial, 1 = lh-white, 2 = rh-pial, 3 = rh-white.
-  //
-  // Em vez de fixar isso as cegas, decide-se pelo proprio exame: dentro de cada par,
-  // o canal de MAIOR media no cortex e a white (no cortex esta-se FORA dela e DENTRO
-  // da pial). Assim um checkpoint futuro com outra ordem nao passa despercebido.
-  const mediaNoCortex = (arr) => {
-    let s = 0, c = 0
-    for (let v = 0; v < arr.length; v++) if (ctxMask[v]) { s += arr[v]; c++ }
-    return c ? s / c : 0
-  }
-  const par = (a, b) => {
-    const ma = mediaNoCortex(sdfs[a]), mb = mediaNoCortex(sdfs[b])
-    return ma > mb ? { W: sdfs[a], P: sdfs[b], wIdx: a } : { W: sdfs[b], P: sdfs[a], wIdx: b }
-  }
-  const lh = par(0, 1), rh = par(2, 3)
-  const esperado = lh.wIdx === 1 && rh.wIdx === 3
-  post(0.6, esperado
+  // Ordem dos canais decidida pelo próprio exame (ver escolheCanaisSdf).
+  const esc = escolheCanaisSdf(sdfs, ctxE, ctxD, ctxMask)
+  const me = esc.medidas.e, md = esc.medidas.d
+  post(0.6, `SynthDist: média da SDF no córtex — E white ${me.W.toFixed(2)} / pial ${me.P.toFixed(2)} mm · D white ${md.W.toFixed(2)} / pial ${md.P.toFixed(2)} mm.`)
+  post(0.6, esc.esperado
     ? 'SynthDist: canais conferidos no exame (white = 1 e 3, pial = 0 e 2).'
-    : `SynthDist: ATENÇÃO — a ordem dos canais neste checkpoint difere da medida nos pesos v10 (white detectada em ${lh.wIdx} e ${rh.wIdx}); seguindo o que o exame indica.`)
-  return { lhW: lh.W, lhP: lh.P, rhW: rh.W, rhP: rh.P }
+    : `SynthDist: ATENÇÃO — a ordem dos canais neste checkpoint difere da medida nos pesos v10 (white detectada em ${esc.ordem.e} e ${esc.ordem.d}); seguindo o que o exame indica.`)
+  return { lhW: esc.lhW, lhP: esc.lhP, rhW: esc.rhW, rhP: esc.rhP }
 }
 
 self.onmessage = async (ev) => {
@@ -235,12 +218,13 @@ self.onmessage = async (ev) => {
     const white = [new Uint8Array(n), new Uint8Array(n)]
     const pial = [new Uint8Array(n), new Uint8Array(n)]
     const ctxMask = new Uint8Array(n)
+    const ctxH = [new Uint8Array(n), new Uint8Array(n)]
     for (let v = 0; v < n; v++) {
       const c = cls[seg[v]]
       if (!c) continue
       const hi = (c.hemi === 1 || (c.hemi === 0 && side[v])) ? 0 : 1
       if (c.kind === 'wm' || c.kind === 'vent' || c.kind === 'sub') { white[hi][v] = 1; pial[hi][v] = 1 }
-      else { pial[hi][v] = 1; if (c.kind === 'ctx') ctxMask[v] = 1 }
+      else { pial[hi][v] = 1; if (c.kind === 'ctx') { ctxMask[v] = 1; ctxH[hi][v] = 1 } }
     }
 
     // SDFs — rede SynthDist (se instalada) ou EDT das máscaras (fallback declarado)
@@ -248,7 +232,7 @@ self.onmessage = async (ev) => {
     let engineUsed = 'edt'
     if (engine === 'net' && modelUrl) {
       try {
-        sdf = await netSdfs(img, segMask, ctxMask, dims, affine, modelUrl, isGPU, tile)
+        sdf = await netSdfs(img, segMask, ctxH[0], ctxH[1], ctxMask, dims, affine, modelUrl, isGPU, tile)
         engineUsed = 'net'
       } catch (e) {
         post(0.06, `Rede SynthDist indisponível (${e.message}) — usando SDF por EDT das máscaras.`)

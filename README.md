@@ -259,9 +259,22 @@ as estatísticas alimentam 1/√(var+ε) e a perda de precisão ali se propaga p
 Conferência: 28/28 camadas casadas, 13,24 M parâmetros, `unet_likelihood` com kernel
 (1,1,1,24,**9**) — os 9 canais de SDF —, **paridade tfjs × Keras de máx |Δ| = 7·10⁻⁵**
 numa saída que varia de −65 a +22, e sinal anatomicamente correto validado contra uma
-segmentação SynthSeg do mesmo exame. O passo 05 já vem com **"Rede SynthDist"
-selecionada**; o caminho traga-seus-pesos continua valendo para quem preferir converter
-de uma instalação local. **Antes de redistribuir**, leia `licenses/synthsurf.txt`: a rede
+segmentação SynthSeg do mesmo exame.
+
+**A ordem dos canais é o inverso do que o código-fonte sugere.** O `mri_synth_surf.py`
+nomeia `W = pred[...,0]` e `P = pred[...,1]`, mas a medição nos pesos v10 mostra que
+**0 = lh-pial, 1 = lh-white, 2 = rh-pial, 3 = rh-white**. A prova está no córtex — a
+faixa *entre* as duas superfícies, onde a white é positiva (está-se fora dela) e a pial
+negativa (está-se dentro): no córtex esquerdo o canal 0 dá −1,12 mm (3,9% positivo) e o
+canal 1 dá +1,18 mm (94,9% positivo); no córtex direito o 2 dá −2,10 mm e o 3, −1,77 mm.
+Fechando o argumento, a fórmula do norm sintético só reproduz o alvo com a atribuição
+medida: **córtex 39,8** contra os 40 pretendidos (a leitura literal dá 63,9). Em vez de
+fixar isso às cegas, `escolheCanaisSdf` **decide pelo próprio exame** — dentro de cada
+par, o canal de maior média no córtex daquele hemisfério é a white — e escreve na linha
+do tempo as médias medidas; um checkpoint futuro com outra ordem é seguido e
+**relatado**, não ignorado. O passo 05 já vem com **"Rede SynthDist" selecionada**; o
+caminho traga-seus-pesos continua valendo para quem preferir converter de uma
+instalação local. **Antes de redistribuir**, leia `licenses/synthsurf.txt`: a rede
 vem do FreeSurfer, cuja licença — diferente do Apache 2.0 do SynthSeg/SynthSR —
 restringe redistribuição.
 
