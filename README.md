@@ -177,7 +177,7 @@ uso em pesquisa, cite o que é reprodução e o que é aproximação:
 | `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesma saída (parcelas DKT), rede diferente; o conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
 | `mri_synthseg --qc` (regressor CNN → `synthseg.qc.csv`) | **QC próprio por grupo tecidual** (confiança × coesão × simetria), nos mesmos 9 grupos e nomes do oficial | **método diferente, declarado** — ver *QC automático* abaixo |
 | `mri_synthsr` (visualização) | SynthSR v1.0 original (paridade r=0,997) | **exato** (em blocos) |
-| SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | rede **SynthDist com pesos convertidos pelo usuário** (`tools/convert_synthsurf_tfjs.py`; a licença do FreeSurfer impede redistribuir) **ou** SDF por EDT exata das máscaras | **exato** com a rede instalada; **aproximação declarada** no fallback (EDT não tem o volume parcial aprendido) |
+| SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | **rede SynthDist original, com os pesos incluídos** (`models/synthsurf/`, 26,5 MB; paridade tfjs×Keras máx \|Δ\| = 7e-5) — opção padrão; SDF por EDT das máscaras segue como alternativa | **exato** (o fallback por EDT é aproximação declarada) |
 | `wm.seg.mgz` / `filled.mgz` (regras de rótulos; partição E/D por EDT) | mesmas regras, mesma partição por EDT | **exato** |
 | `norm.mgz` sintético (70·tanh(2(W+0,3)) + 40·tanh(2P), máscara dilatada 3) | fórmula idêntica; exportável (`Norm sintético`) | **exato** |
 | `talairach.xfm` (COGs medianos vs. tabela do ICBM152, `getM`) | porte exato, mesma tabela de COGs; exportável | **exato** |
@@ -251,10 +251,19 @@ GPU integrada, não. Por isso o QC do navegador é o próprio, descrito acima. A
 `unet_parc` **não** tem esse problema (é uma UNet igual às que já rodamos em blocos com
 sobreposição) e é o próximo passo natural quando você converter os pesos.
 
-**Instalando a rede SynthDist** (para o modo exato): copie
-`$FREESURFER_HOME/models/synthsurf_v10_230420.h5` de qualquer FreeSurfer ≥ 7.4, rode
-`python3 tools/convert_synthsurf_tfjs.py --h5 … --out models/synthsurf` e sirva a pasta
-junto do aplicativo — o passo 05 detecta e passa a usá-la (proveniência registra o motor).
+**A rede SynthDist acompanha o projeto.** O checkpoint oficial tem 159 MB porque
+carrega o estado do otimizador Adam; `models/shrink_checkpoint.py` o reduz a
+**24,4 MB** (pesos-só, convoluções em float16 e **BatchNorm preservada em float32** —
+as estatísticas alimentam 1/√(var+ε) e a perda de precisão ali se propaga pela rede), e
+`tools/convert_synthsurf_tfjs.py` gera `models/synthsurf/` (26,5 MB) com a mesma regra.
+Conferência: 28/28 camadas casadas, 13,24 M parâmetros, `unet_likelihood` com kernel
+(1,1,1,24,**9**) — os 9 canais de SDF —, **paridade tfjs × Keras de máx |Δ| = 7·10⁻⁵**
+numa saída que varia de −65 a +22, e sinal anatomicamente correto validado contra uma
+segmentação SynthSeg do mesmo exame. O passo 05 já vem com **"Rede SynthDist"
+selecionada**; o caminho traga-seus-pesos continua valendo para quem preferir converter
+de uma instalação local. **Antes de redistribuir**, leia `licenses/synthsurf.txt`: a rede
+vem do FreeSurfer, cuja licença — diferente do Apache 2.0 do SynthSeg/SynthSR —
+restringe redistribuição.
 
 ## Superfícies corticais (passo 05) — saídas
 
@@ -350,6 +359,8 @@ workers/surface.worker.js              motor anterior (surface nets puro; substi
 brainchop/                             worker de inferência do brain2print (MIT)
 models/synthseg1/                      SynthSeg 1.0 em tfjs f16 (27 MB) + rótulos
 models/synthsr/                        SynthSR v1.0 em tfjs f16 (26 MB) + fixture de paridade
+models/synthsurf/                      SynthDist em tfjs f16 (26,5 MB) + fixture de paridade
+models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts de redução
 models/fastsurfer/                     FastSurferCNN v1 f16 (3×3,6 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/model*/                         MeshNet do brainchop (MIT)
@@ -430,8 +441,9 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
 - **recon-all-clinical / SynthDist** — Gopinath, Greve, Magdamo, Arnold, Das, Puonti,
   Iglesias ([freesurfer/freesurfer](https://github.com/freesurfer/freesurfer) →
   `recon_all_clinical/`): fluxo e fórmulas reimplementados do código-fonte; os pesos do
-  SynthDist seguem a licença do FreeSurfer e NÃO são redistribuídos
-  (`licenses/synthsurf.txt`). Cite *"Recon-all-clinical": Cortical surface
+  SynthDist acompanham o projeto em forma reduzida e seguem a **licença do FreeSurfer**,
+  que restringe redistribuição — leia `licenses/synthsurf.txt` antes de publicar um fork
+  ou mirror. Cite *"Recon-all-clinical": Cortical surface
   reconstruction and analysis of heterogeneous clinical brain MRI* (Medical Image
   Analysis, 2025).
 - **FastSurfer** — Henschel, Conjeti, Estrada, Diers, Fischl, Reuter

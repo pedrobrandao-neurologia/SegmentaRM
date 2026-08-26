@@ -2,11 +2,16 @@
 """Converte o SynthDist / mri_synth_surf (rede de SDFs do recon-all-clinical;
 Gopinath et al., Medical Image Analysis 2025) para TensorFlow.js float16.
 
-Os pesos NÃO são redistribuídos com o SegmentaRM: a licença do FreeSurfer não
-permite. Obtenha-os você mesmo — o arquivo `synthsurf_v10_230420.h5` acompanha
-qualquer instalação do FreeSurfer >= 7.4 em `$FREESURFER_HOME/models/`
-(tamanho: 159.148.696 bytes; sha256
-f02f70dacb753c019ea590f5ca36617dc8ace32eb571c74ffc648c926ad7bbbc).
+Uma cópia reduzida dos pesos acompanha o projeto em `models/synthsurf_v10_fp16.h5`
+(24,4 MB: sem estado do otimizador, convoluções em float16 e BatchNorm em float32
+— ver `models/shrink_checkpoint.py`) e já convertida em `models/synthsurf/`, de modo
+que o passo 05 funciona sem instalação. Leia `licenses/synthsurf.txt` antes de
+redistribuir: a rede vem do FreeSurfer, cuja licença restringe redistribuição.
+O caminho traga-seus-pesos continua valendo — o `synthsurf_v10_230420.h5` original
+acompanha qualquer instalação do FreeSurfer >= 7.4 em `$FREESURFER_HOME/models/`
+(159.148.696 bytes; sha256
+f02f70dacb753c019ea590f5ca36617dc8ace32eb571c74ffc648c926ad7bbbc) e este script
+aceita tanto ele quanto a versão enxugada.
 
 Arquitetura (lida do mri_synth_surf.py, código FreeSurfer, branch dev): o
 mesmo `unet` do neurite usado pelo SynthSeg/SynthSR — 5 níveis, 2 convs 3³ por
@@ -14,12 +19,13 @@ nível, 24 filtros ×2 por nível, ELU, BatchNorm por nível, saída LINEAR de
 9 canais (0..3 = SDF lh-white, lh-pial, rh-white, rh-pial, recorte ±5 mm; os
 demais canais não são usados pelo pipeline oficial).
 
-Uso:
+Uso (qualquer um dos dois checkpoints):
+  python3 tools/convert_synthsurf_tfjs.py --h5 models/synthsurf_v10_fp16.h5 --out models/synthsurf
   python3 tools/convert_synthsurf_tfjs.py \
       --h5 $FREESURFER_HOME/models/synthsurf_v10_230420.h5 --out models/synthsurf
 
-Depois, sirva/copie a pasta `models/synthsurf/` junto do aplicativo: o passo 05
-detecta o model.json e passa a usar a rede em vez do fallback por EDT.
+O passo 05 detecta `models/synthsurf/model.json` e usa a rede; sem ela, cai no
+fallback declarado por EDT das máscaras.
 """
 import argparse
 import json
@@ -80,11 +86,41 @@ def main():
     args = ap.parse_args()
 
     net = build_unet()
-    net.load_weights(args.h5, by_name=True)
+    try:
+        net.load_weights(args.h5, by_name=True)
+    except (ValueError, TypeError) as e:
+        # algumas versoes do TF recusam atribuir arrays float16 a variaveis
+        # float32; nesse caso o upcast vai explicito, camada a camada
+        # (mesma estrategia de models/load_fp16_weights.py)
+        print(f'load_weights direto falhou ({e}); carregando com upcast explicito')
+        import h5py
+        with h5py.File(args.h5, 'r') as f:
+            g = f['model_weights'] if 'model_weights' in f else f
+            disponiveis = {n.decode() if isinstance(n, bytes) else n
+                           for n in g.attrs['layer_names']}
+            for layer in net.layers:
+                if not layer.weights or layer.name not in disponiveis:
+                    continue
+                lg = g[layer.name]
+                nomes = [n.decode() if isinstance(n, bytes) else n
+                         for n in lg.attrs['weight_names']]
+                vals = [np.asarray(lg[n]).astype(np.float32) for n in nomes]
+                esperado = [tuple(w.shape) for w in layer.weights]
+                if esperado != [v.shape for v in vals]:
+                    raise SystemExit(f"shape incompativel em '{layer.name}': "
+                                     f'modelo {esperado} vs arquivo {[v.shape for v in vals]}')
+                layer.set_weights(vals)
 
     import h5py
     with h5py.File(args.h5, 'r') as f:
-        h5_layers = {n for n in f.attrs['layer_names'].astype(str) if len(f[n]) > 0} if 'layer_names' in f.attrs else {k for k in f.keys() if len(f[k]) > 0}
+        # dois layouts possiveis: pesos na raiz (checkpoint cru) ou sob
+        # 'model_weights' (h5 de modelo completo, inclusive o enxugado por
+        # models/shrink_checkpoint.py)
+        g = f['model_weights'] if 'model_weights' in f else f
+        if 'layer_names' in g.attrs:
+            h5_layers = {n for n in g.attrs['layer_names'].astype(str) if len(g[n]) > 0}
+        else:
+            h5_layers = {k for k in g.keys() if len(g[k]) > 0}
     model_layers = {l.name for l in net.layers if l.weights}
     missing = {n for n in h5_layers if n not in model_layers}
     if missing:
@@ -115,8 +151,12 @@ def main():
     for w in net.weights:
         name = w.name[:-2] if w.name.endswith(':0') else w.name
         arr = w.numpy().astype(np.float32)
-        # variâncias de BatchNorm podem exceder o alcance do float16 (65504)
-        if args.f32 or np.abs(arr).max() > 6e4:
+        # BatchNorm fica SEMPRE em float32: as estatisticas alimentam
+        # 1/sqrt(var+eps) e a perda de precisao ali propaga pela rede toda
+        # (mesma regra de models/shrink_checkpoint.py); alem disso, variancias
+        # podem exceder o alcance do float16 (65504)
+        bn = any(k in name for k in ('moving_variance', 'moving_mean', 'gamma', 'beta'))
+        if args.f32 or bn or np.abs(arr).max() > 6e4:
             specs.append({'name': name, 'shape': list(arr.shape), 'dtype': 'float32'})
             blobs.append(arr.tobytes())
         else:
