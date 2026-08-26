@@ -55,34 +55,45 @@ self.onmessage = async (ev) => {
       const y = model.predict(xyz)
       const amXyz = tf.argMax(y, -1)
       const amZyx = amXyz.transpose([0, 3, 2, 1])
-      const argmax = await amZyx.data()
-      tf.dispose([zyx, xyz, y, amXyz, amZyx])
-      return { argmax }
+      // posterior máxima por voxel = confiança da rede (base do QC por grupo tecidual)
+      const mxXyz = tf.max(y, -1)
+      const mxZyx = mxXyz.transpose([0, 3, 2, 1])
+      const [argmax, conf] = await Promise.all([amZyx.data(), mxZyx.data()])
+      tf.dispose([zyx, xyz, y, amXyz, amZyx, mxXyz, mxZyx])
+      return { argmax, conf }
     }
+    const cropConf = new Float32Array(bbox.size[0] * bbox.size[1] * bbox.size[2])
     const cropSeg = await tiledSegment({
       data: crop,
       dims: bbox.size,
       tile,
       overlap,
       predictTile,
+      confOut: cropConf,
       onProgress: (done, total) => {
         ui(`SynthSeg: bloco ${done}/${total}`, 0.08 + 0.88 * done / total)
       }
     })
 
     // devolve ao volume RAS cheio e depois à ordem crua da imagem conformada
+    // (a confiança segue o mesmo caminho, quantizada em 0–255)
     const rasSeg = new Uint8Array(ras.dims[0] * ras.dims[1] * ras.dims[2])
+    const rasConf = new Uint8Array(rasSeg.length)
     v = 0
     for (let k = 0; k < bbox.size[2]; k++) {
       for (let j = 0; j < bbox.size[1]; j++) {
         const dst = (bbox.min[2] + k) * nx * ny + (bbox.min[1] + j) * nx + bbox.min[0]
         rasSeg.set(cropSeg.subarray(v, v + bbox.size[0]), dst)
+        for (let i = 0; i < bbox.size[0]; i++) {
+          rasConf[dst + i] = Math.round(255 * Math.max(0, Math.min(1, cropConf[v + i])))
+        }
         v += bbox.size[0]
       }
     }
     const seg = fromRAS(rasSeg, dims, orientation)
+    const conf = fromRAS(rasConf, dims, orientation)
     ui(`SynthSeg: inferência concluída em ${((performance.now() - t0) / 1000).toFixed(0)} s.`, 0.97)
-    self.postMessage({ cmd: 'img', img: seg }, [seg.buffer])
+    self.postMessage({ cmd: 'img', img: seg, conf }, [seg.buffer, conf.buffer])
   } catch (e) {
     ui('', -1, 'SynthSeg: ' + String((e && e.message) || e))
   }

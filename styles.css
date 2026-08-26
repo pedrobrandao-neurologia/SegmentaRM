@@ -234,6 +234,16 @@ input::placeholder { color: var(--faint); }
 .chip:hover, .chip:focus-visible { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
 .chip:active { transform: translateY(0.5px); }
 
+/* ---------- painel de QC por grupo tecidual ---------- */
+.qc-bar {
+  display: inline-block; width: 46px; height: 5px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.10); margin-right: 7px; vertical-align: middle; overflow: hidden;
+}
+.qc-bar i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+#qc-table tr.bad td { color: var(--accent-strong); }
+#qc-table tr.bad .qc-bar i { background: var(--accent); }
+.qc-sum { font: 11.5px/1.5 var(--mono); color: var(--dim); margin: 8px 0 6px; }
+
 /* ---------- diálogo de erro (tutorial + log exportável) ---------- */
 .err-dlg { width: min(520px, 92vw); border-color: rgba(224, 101, 90, 0.45); }
 .err-dlg .err-stage { font: 11px/1.4 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }

@@ -173,7 +173,9 @@ uso em pesquisa, cite o que é reprodução e o que é aproximação:
 
 | recon-all-clinical.sh | Aqui | Fidelidade |
 |---|---|---|
-| `mri_synthseg --robust --parc` | SynthSeg 1.0 (rede original) + parcelação DKT da FastSurferCNN | **análogo declarado** — é a versão 1.0 + FastSurfer, não o SynthSeg+ hierárquico com QC (planejado) |
+| `mri_synthseg --robust` (cadeia S1→denoiser→S2) | SynthSeg 1.0 (rede original) | **análogo declarado** — ver *Por que o modo robusto não roda no navegador* abaixo |
+| `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesma saída (parcelas DKT), rede diferente; o conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
+| `mri_synthseg --qc` (regressor CNN → `synthseg.qc.csv`) | **QC próprio por grupo tecidual** (confiança × coesão × simetria), nos mesmos 9 grupos e nomes do oficial | **método diferente, declarado** — ver *QC automático* abaixo |
 | `mri_synthsr` (visualização) | SynthSR v1.0 original (paridade r=0,997) | **exato** (em blocos) |
 | SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | rede **SynthDist com pesos convertidos pelo usuário** (`tools/convert_synthsurf_tfjs.py`; a licença do FreeSurfer impede redistribuir) **ou** SDF por EDT exata das máscaras | **exato** com a rede instalada; **aproximação declarada** no fallback (EDT não tem o volume parcial aprendido) |
 | `wm.seg.mgz` / `filled.mgz` (regras de rótulos; partição E/D por EDT) | mesmas regras, mesma partição por EDT | **exato** |
@@ -190,6 +192,64 @@ uso em pesquisa, cite o que é reprodução e o que é aproximação:
 Validação do motor: fantoma de esferas — descida ao nível zero com desvio máximo
 0,36 mm, espessura esférica 2,98/3,00 mm, χ=2 preservado, repulsão impede a pial de
 invadir a white, norm 110/40/0 exatos, Talairach recupera escala/translação sintéticas.
+
+### QC automático da segmentação (por grupo tecidual)
+
+Toda segmentação sai com um **QC por grupo tecidual**, no painel do inspetor, no PDF, no
+JSON e num **`*_qc.csv`** de uma linha por exame — feito para triagem de lote, que é
+onde o `synthseg.qc.csv` entra num projeto de pesquisa. Os **9 grupos e seus nomes são os
+do regressor oficial** do SynthSeg 2.0 (extraídos de `synthseg_qc_labels_2.0.npy` /
+`..._names_2.0.npy`), então a tabela tem a mesma forma; o **escore, porém, é próprio**:
+
+| componente | o que mede | de onde vem |
+|---|---|---|
+| **confiança** | incerteza do próprio modelo | média da posterior máxima (softmax) nos voxels do grupo — sai de graça da rede, antes descartada no argmax |
+| **coesão** | fragmentação / ilhas espúrias | fração dos voxels de cada estrutura no seu maior componente conexo (6-vizinhança), agregada ao grupo por volume |
+| **simetria** | perda unilateral | 1 − excesso de assimetria E/D (\|IA\| até 10% não penaliza, 40% zera); grupos medianos ficam de fora |
+
+`escore = confiança × coesão × simetria` — multiplicativo, para que uma única falha
+derrube o grupo. Os três componentes vão **separados** no CSV/JSON justamente para você
+recalibrar o corte na sua coorte. **O escore não é o Dice predito pelo regressor
+oficial**: é outra grandeza, em outra escala; o 0,65 do artigo (Billot et al., *PNAS*
+2023) entra só como referência de partida.
+
+Validação (fantomas + uma segmentação SynthSeg **real** progressivamente degradada):
+
+| ruído de rótulo | coesão da SB | escore mínimo global | grupos em alerta |
+|---|---|---|---|
+| 0% (íntegra) | 0,998 | 0,971 | 0 |
+| 0,5% | 0,993 | 0,932 | 0 |
+| 2% | 0,983 | 0,830 | 0 |
+| 5% | 0,958 | 0,653 | 0 |
+| 12% | 0,914 | 0,464 | 3 |
+
+Perda unilateral de metade de um hemisfério derruba a pior simetria de 1,000 para 0,099.
+O mapa de confiança também é exportável (`.nii.gz`, 0–255) e visualizável a um clique na
+linha do tempo. Só o **SynthSeg** devolve posteriores; com os modelos MeshNet o
+componente de confiança fica neutro e a proveniência declara isso.
+
+### Por que o modo robusto e o regressor de QC do SynthSeg 2.0 não rodam no navegador
+
+`tools/convert_synthseg2_tfjs.py` converte as **quatro** redes do SynthSeg 2.0 (S1,
+denoiser `l2l`, S2, `unet_parc` e o regressor `qc`) no padrão traga-seus-pesos — o
+construtor foi verificado camada a camada contra o `synthseg_1.0.h5` real (28/28
+casadas, com controles negativos). Mas duas delas esbarram na memória do navegador, por
+construção:
+
+- o **denoiser** é um prior de forma sobre o encéfalo **inteiro** — dividir em blocos
+  quebraria exatamente o que ele faz, então não há a saída de tiles que usamos nas
+  outras redes;
+- o **regressor de QC** recebe a segmentação recortada/preenchida a **exatamente 224³**
+  (`MakeShape(224)`, sem reduzir resolução) em **one-hot de 9 canais**: são **405 MB só
+  no tensor de entrada** e **1,08 GB na primeira ativação** (224³ × 24 filtros × 4 B),
+  com várias dessas vivas ao mesmo tempo no forward.
+
+Tentei medir o limite real aqui, mas este ambiente só tem WebGL por software
+(SwiftShader) — a medição não terminou e não representaria uma GPU de verdade, então
+fica a aritmética acima, que é exata. Numa workstation com GPU grande pode caber; em
+GPU integrada, não. Por isso o QC do navegador é o próprio, descrito acima. A
+`unet_parc` **não** tem esse problema (é uma UNet igual às que já rodamos em blocos com
+sobreposição) e é o próximo passo natural quando você converter os pesos.
 
 **Instalando a rede SynthDist** (para o modo exato): copie
 `$FREESURFER_HOME/models/synthsurf_v10_230420.h5` de qualquer FreeSurfer ≥ 7.4, rode
@@ -230,6 +290,8 @@ os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clí
   lobos, estruturas, assimetria, superfície cortical e página de métodos
 - **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, MP-RAGE
   sintético, máscara, cérebro extraído, **norm sintético**) em `.nii.gz`
+- **QC `.csv`** — escore, confiança, coesão e simetria por grupo tecidual (uma linha por
+  exame, na forma do `synthseg.qc.csv`) + mapa de confiança da rede em `.nii.gz`
 - **`talairach.xfm`** — transformada linear para o MNI (formato MNI Transform File)
 - **Malhas** — white/pial em `.mz3` dentro do `.zip` (com o xfm e o norm)
 - **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav`
@@ -271,6 +333,7 @@ lib/tfjs-upsampling3d.js               camadas 3D ausentes no tfjs
 lib/fastsurfer-core.js                 FastSurferCNN v1 (forward, vistas, LIA, agregação)
 lib/synthsr-core.js                    SynthSR: reamostragem RAS 1 mm + blocos de inferência
 lib/sdf-surface.js                     recon-clinical: SDFs, partição E/D, Eq. 5, Euler, Talairach
+lib/segqc.js                           QC por grupo tecidual (confiança, coesão, simetria)
 lib/dkt-fusion.js                      fusão parcelação→córtex (esquema do predict_synthseg)
 lib/surfaces.js                        EDT, surface nets, Taubin, áreas, MZ3
 lib/normative.js                       percentil/z contra os brain charts
@@ -293,6 +356,7 @@ models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
 tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
 tools/convert_synthsurf_tfjs.py        conversor SynthDist (traga-seus-pesos do FreeSurfer)
+tools/convert_synthseg2_tfjs.py        conversor SynthSeg 2.0: S1/denoiser/S2, parc e QC (traga-seus-pesos)
 tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, sem torch)
 licenses/                              licenças e proveniência dos pesos
 vendor/                                NiiVue, dcm2niix WASM, TensorFlow.js, fontes

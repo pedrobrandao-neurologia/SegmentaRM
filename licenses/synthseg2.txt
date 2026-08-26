@@ -1,0 +1,63 @@
+SynthSeg 2.0 (SynthSeg+) — redes robusta, de parcelação e de QC
+
+Redes e pesos: Benjamin Billot, Juan Eugenio Iglesias e colaboradores
+(https://github.com/BBillot/SynthSeg). Licença: Apache License 2.0.
+
+OS PESOS 2.0 NÃO ACOMPANHAM O SEGMENTARM. Ao contrário do synthseg_1.0.h5 (que está
+versionado no repositório do Billot e vai convertido em models/synthseg1/), os modelos
+2.0 são distribuídos à parte — pelo OneDrive da UCL indicado no README daquele
+repositório, ou dentro de qualquer instalação do FreeSurfer >= 7.3 em
+$FREESURFER_HOME/models/. Arquivos esperados:
+
+  synthseg_robust_2.0.h5   cadeia S1 → denoiser (l2l) → S2, num único arquivo
+  synthseg_2.0.h5          segmentação simples (não robusta)
+  synthseg_parc_2.0.h5     parcelação cortical (unet_parc, 69 rótulos)
+  synthseg_qc_2.0.h5       regressor CNN de QC (9 grupos teciduais)
+
+Conversão (uma pasta tfjs por rede):
+
+  python3 tools/convert_synthseg2_tfjs.py --which robust --h5 .../synthseg_robust_2.0.h5 --out models/synthseg2/robust
+  python3 tools/convert_synthseg2_tfjs.py --which parc   --h5 .../synthseg_parc_2.0.h5   --out models/synthseg2/parc
+  python3 tools/convert_synthseg2_tfjs.py --which qc     --h5 .../synthseg_qc_2.0.h5     --out models/synthseg2/qc
+
+O modo --which robust grava TRÊS subpastas (s1/, denoiser/, s2/): as transições entre as
+sub-redes são argmax → one-hot → concatenação com a imagem, que não são serializáveis num
+LayersModel e ficam a cargo do JavaScript. A cobertura dos pesos é conferida nos dois
+sentidos contra o h5 (nenhuma camada sem peso, nenhum peso sem camada).
+
+Arquiteturas reproduzidas do código-fonte oficial (SynthSeg/predict_synthseg.py, função
+build_model, e ext/neuron/models.py):
+
+  S1        unet,      1 canal  → 5 grupos,  5 níveis, 2 conv/nível, k=3, 24 feats
+  denoiser  l2l,       5 canais → 5 grupos,  5 níveis, 2 conv/nível, k=5, 16 feats,
+                                 skip_n_concatenations=2
+  S2        unet2,     6 canais → 33 rótulos, 5 níveis, 2 conv/nível, k=3, 24 feats
+  parc      unet_parc, 3 canais → 69 rótulos, 5 níveis, 2 conv/nível, k=3, 24 feats
+  qc        conv_enc,  9 canais → 9 escores,  4 níveis, 2 conv/nível, k=5, 24 feats,
+                                 use_residuals=True, + maxpool e duas conv 5³ finais
+
+Observações de fidelidade apuradas na leitura do fonte (importantes para conferência):
+
+  · o número de rótulos da segmentação é 33, e não 55: o predict() aplica np.unique aos
+    rótulos do .npy antes de construir a rede (o mesmo vale para o 1.0, cujo h5 real tem
+    32 canais de saída para um .npy de 54 entradas / 32 únicos);
+  · os canais de entrada de l2l (5) e de unet2 (6 = imagem + one-hot de 5 grupos) não são
+    os do argumento input_shape das chamadas: quando existe input_model, o conv_enc usa a
+    saída do modelo anterior e o input_shape só define a dimensionalidade;
+  · o construtor de unet foi verificado camada a camada contra o synthseg_1.0.h5 REAL
+    (28/28 casadas, pesos carregados de fato), com controles negativos.
+
+Citações:
+  Billot B, Greve DN, Puonti O, Thielscher A, Van Leemput K, Fischl B, Dalca AV,
+  Iglesias JE. SynthSeg: Segmentation of brain MRI scans of any contrast and resolution
+  without retraining. Medical Image Analysis 86 (2023) 102789.
+
+  Billot B, Magdamo C, Cheng Y, Arnold SE, Das S, Iglesias JE. Robust machine learning
+  segmentation for large-scale analysis of heterogeneous clinical brain MRI datasets.
+  PNAS 120 (2023) e2216399120.  (versão "+": robusta, parcelação e QC)
+
+Sobre o QC deste aplicativo: sem o regressor 2.0 instalado, o SegmentaRM calcula um QC
+PRÓPRIO (lib/segqc.js) nos mesmos 9 grupos teciduais e com os mesmos nomes do regressor
+oficial, mas por outro método (confiança da rede × coesão de componentes × simetria). O
+escore resultante NÃO é o Dice predito pelo regressor — está declarado assim na interface,
+no JSON, no PDF e no CSV.
