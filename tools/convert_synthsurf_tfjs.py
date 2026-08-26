@@ -16,8 +16,12 @@ aceita tanto ele quanto a versão enxugada.
 Arquitetura (lida do mri_synth_surf.py, código FreeSurfer, branch dev): o
 mesmo `unet` do neurite usado pelo SynthSeg/SynthSR — 5 níveis, 2 convs 3³ por
 nível, 24 filtros ×2 por nível, ELU, BatchNorm por nível, saída LINEAR de
-9 canais (0..3 = SDF lh-white, lh-pial, rh-white, rh-pial, recorte ±5 mm; os
-demais canais não são usados pelo pipeline oficial).
+9 canais, recorte ±5 mm; o pipeline usa 0..3 (os dois hemisférios). ATENÇÃO à
+ordem: apesar de o mri_synth_surf.py nomear `W = pred[...,0]` e `P = pred[...,1]`,
+a medição nos pesos v10 mostra 0 = lh-pial, 1 = lh-white, 2 = rh-pial, 3 = rh-white
+— só essa atribuição reproduz o perfil pretendido pela fórmula do norm sintético
+(córtex 39,8 contra os 40 do alvo; a leitura literal dá 63,9). O worker do
+navegador decide isso pelo próprio exame e avisa se divergir.
 
 Uso (qualquer um dos dois checkpoints):
   python3 tools/convert_synthsurf_tfjs.py --h5 models/synthsurf_v10_fp16.h5 --out models/synthsurf

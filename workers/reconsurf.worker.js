@@ -92,8 +92,9 @@ function permuteFromRAS (volRas, dimsRas, dims, map, Ctor = Float32Array) {
 
 // SDFs pela rede SynthDist (pesos convertidos pelo usuário — traga-seus-pesos):
 // recorte à caixa do encéfalo + margem, blocos 96³ com sobreposição e recorte
-// central, 9 canais de saída (0..3 = SDF lh-white, lh-pial, rh-white, rh-pial)
-async function netSdfs (img, seg, dims, affine, modelUrl, isGPU, tile) {
+// central, 9 canais de saída (0..3 = SDFs dos dois hemisférios; a atribuição
+// white/pial é decidida pelo próprio exame — ver o bloco no fim desta função)
+async function netSdfs (img, seg, ctxMask, dims, affine, modelUrl, isGPU, tile) {
   const tf = await import('../vendor/tf.fesm.min.js')
   const { registerUpSampling3D } = await import('../lib/tfjs-upsampling3d.js')
   registerUpSampling3D(tf)
@@ -166,8 +167,31 @@ async function netSdfs (img, seg, dims, affine, modelUrl, isGPU, tile) {
     }
     return permuteFromRAS(full, rd, dims, map)
   })
-  // ordem oficial: 0 lh-white, 1 lh-pial, 2 rh-white, 3 rh-pial
-  return { lhW: sdfs[0], lhP: sdfs[1], rhW: sdfs[2], rhP: sdfs[3] }
+  // ORDEM DOS CANAIS. O mri_synth_surf.py nomeia `W = pred[...,0]` e `P = pred[...,1]`,
+  // mas a medicao nos pesos v10 mostra o contrario: no cortex (entre as duas
+  // superficies) o canal 0 fica NEGATIVO (dentro da pial) e o canal 1 POSITIVO (fora
+  // da white), e so a atribuicao W=canal 1 / P=canal 0 reproduz o perfil pretendido
+  // pela formula do norm sintetico (cortex 39,8 contra os 40 do alvo; a leitura
+  // literal da 63,9). Logo: 0 = lh-pial, 1 = lh-white, 2 = rh-pial, 3 = rh-white.
+  //
+  // Em vez de fixar isso as cegas, decide-se pelo proprio exame: dentro de cada par,
+  // o canal de MAIOR media no cortex e a white (no cortex esta-se FORA dela e DENTRO
+  // da pial). Assim um checkpoint futuro com outra ordem nao passa despercebido.
+  const mediaNoCortex = (arr) => {
+    let s = 0, c = 0
+    for (let v = 0; v < arr.length; v++) if (ctxMask[v]) { s += arr[v]; c++ }
+    return c ? s / c : 0
+  }
+  const par = (a, b) => {
+    const ma = mediaNoCortex(sdfs[a]), mb = mediaNoCortex(sdfs[b])
+    return ma > mb ? { W: sdfs[a], P: sdfs[b], wIdx: a } : { W: sdfs[b], P: sdfs[a], wIdx: b }
+  }
+  const lh = par(0, 1), rh = par(2, 3)
+  const esperado = lh.wIdx === 1 && rh.wIdx === 3
+  post(0.6, esperado
+    ? 'SynthDist: canais conferidos no exame (white = 1 e 3, pial = 0 e 2).'
+    : `SynthDist: ATENÇÃO — a ordem dos canais neste checkpoint difere da medida nos pesos v10 (white detectada em ${lh.wIdx} e ${rh.wIdx}); seguindo o que o exame indica.`)
+  return { lhW: lh.W, lhP: lh.P, rhW: rh.W, rhP: rh.P }
 }
 
 self.onmessage = async (ev) => {
@@ -224,7 +248,7 @@ self.onmessage = async (ev) => {
     let engineUsed = 'edt'
     if (engine === 'net' && modelUrl) {
       try {
-        sdf = await netSdfs(img, segMask, dims, affine, modelUrl, isGPU, tile)
+        sdf = await netSdfs(img, segMask, ctxMask, dims, affine, modelUrl, isGPU, tile)
         engineUsed = 'net'
       } catch (e) {
         post(0.06, `Rede SynthDist indisponível (${e.message}) — usando SDF por EDT das máscaras.`)
