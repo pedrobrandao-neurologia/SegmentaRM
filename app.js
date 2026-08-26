@@ -16,6 +16,7 @@ import { makeZip } from './lib/zip.js'
 import { fuseDKT } from './lib/dkt-fusion.js'
 import { loadNorms, compareToNorms } from './lib/normative.js'
 import { scanDicomSeries, directSeriesToNifti } from './lib/dicom-scan.js'
+import { computeSegQC, qcToCSV } from './lib/segqc.js'
 
 const VERSION = '1.0.0'
 const $ = (id) => document.getElementById(id)
@@ -51,6 +52,8 @@ const state = {
   norms: null,
   native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
   synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
+  segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
+  qc: null,            // { grupos, estruturas, resumo } — QC por grupo tecidual
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
   wl: null,            // janela de exibição atual { min, max } do volume base
@@ -360,6 +363,7 @@ async function viewDeliverable (kind, label = '') {
     else if (kind === 'conf' || kind === 'seg' || kind === 'mask') base = state.conformed
     else if (kind === 'brain') base = state.bet && await intermediateVol('brain', state.bet.brain, 'uint8', 'cérebro extraído')
     else if (kind === 'norm') base = state.surf && state.surf.norm && await intermediateVol('norm', state.surf.norm, 'float32', 'norm sintético recon-clinical')
+    else if (kind === 'confmap') base = state.segConf && await intermediateVol('confmap', state.segConf, 'uint8', 'confianca da rede (posterior maxima)')
     if (!base) { log('Este entregável não está mais disponível — rode a etapa de novo.', 'err'); return }
     while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
     await nv.addVolume(base)
@@ -738,11 +742,14 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.synthsr = null
   state.bet = null
   state.surf = null
+  state.qc = null
+  state.segConf = null
   $('run-dkt').disabled = true
   $('run-surf').disabled = true
   $('show-surf').disabled = true
   $('show-surf').checked = false
   $('surf-panel').hidden = true
+  $('qc-panel').hidden = true
   state.sidecar = sidecar || null
   state.inputDesc = desc
   state.wl = null
@@ -914,6 +921,12 @@ function runWorker (url, message, pFrom, pTo) {
         if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
       } else if (d.cmd === 'img') {
         w.terminate(); state.worker = null
+        // posterior máxima por voxel (0–255), quando a rede a devolve: é a
+        // confiança usada pelo QC por grupo tecidual. Só sobrescreve quando vem —
+        // o passo DKT roda outra rede (FastSurfer/brainchop, sem posteriores) e não
+        // pode apagar a confiança da segmentação que ele está refinando; a limpeza
+        // por execução fica no início de runSegmentation.
+        if (d.conf) state.segConf = new Uint8Array(d.conf)
         log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
         resolve(new Uint8Array(d.img))
       }
@@ -1048,6 +1061,8 @@ function updateIntermediateExports () {
   if (q('nii-brain')) q('nii-brain').disabled = !state.bet
   if (q('nii-norm')) q('nii-norm').disabled = !(state.surf && state.surf.norm)
   if (q('xfm')) q('xfm').disabled = !(state.surf && state.surf.xfm)
+  if (q('qc-csv')) q('qc-csv').disabled = !state.qc
+  if (q('nii-conf')) q('nii-conf').disabled = !state.segConf
 }
 
 // recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
@@ -1061,6 +1076,30 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     progress(0.95)
     state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
     renderResults()
+    // QC automático por grupo tecidual (grupos do regressor do SynthSeg 2.0)
+    try {
+      state.qc = computeSegQC({
+        seg: state.seg,
+        conf: state.segConf,
+        dims: dimsOf(state.conformed),
+        labelsMap: state.labelsMap,
+        voxVol: voxVolOf(state.conformed)
+      })
+      renderQC()
+      const r = state.qc.resumo
+      const alertas = r.gruposEmAlerta.length
+      log(`QC da segmentação: escore mínimo ${r.escoreMinimo.toFixed(2)}, médio ${r.escoreMedio.toFixed(2)}` +
+        (alertas ? ` — ${alertas} grupo(s) abaixo de 0,65: ${r.gruposEmAlerta.join(', ')}.` : ' — nenhum grupo em alerta.'),
+      alertas ? 'err' : 'ok')
+      if (TL.current) {
+        tlNote(TL.current, `QC por grupo tecidual: mínimo ${r.escoreMinimo.toFixed(2)} · médio ${r.escoreMedio.toFixed(2)}` +
+          (alertas ? ` — em alerta: ${r.gruposEmAlerta.join(', ')}` : ' — nenhum grupo em alerta'), alertas ? 'warn' : 'info')
+        if (!r.confiancaDisponivel) tlNote(TL.current, 'rede sem posteriores — QC usa só coesão e simetria', 'warn')
+      }
+    } catch (e) {
+      log('QC não calculado: ' + e.message, 'err')
+      state.qc = null
+    }
     await updateNorms()
     $('step-export').hidden = false
     updateIntermediateExports()
@@ -1355,6 +1394,26 @@ async function showSurfaces (on) {
   }
 }
 
+// painel de QC: uma linha por grupo tecidual, com barra do escore e os três componentes
+function renderQC () {
+  if (!state.qc) { $('qc-panel').hidden = true; return }
+  const fmt = (x, d = 2) => x == null ? '—' : (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const tb = $('qc-table')
+  tb.querySelector('thead').innerHTML =
+    '<tr><th>Grupo tecidual</th><th>Escore</th><th>Conf.</th><th>Coes.</th><th>Sim.</th></tr>'
+  tb.querySelector('tbody').innerHTML = state.qc.grupos.filter(q => q.voxels > 0).map(q => {
+    const pct = Math.max(0, Math.min(100, q.escore * 100))
+    return `<tr class="${q.alerta ? 'bad' : ''}"><td title="${q.pt}">${q.curto || q.pt}</td>` +
+      `<td><span class="qc-bar"><i style="width:${pct.toFixed(0)}%"></i></span>${fmt(q.escore)}</td>` +
+      `<td>${fmt(q.confianca)}</td><td>${fmt(q.coesao)}</td><td>${q.simetria == null ? '—' : fmt(q.simetria)}</td></tr>`
+  }).join('')
+  const r = state.qc.resumo
+  $('qc-summary').textContent = `Escore mínimo ${fmt(r.escoreMinimo)} · médio ${fmt(r.escoreMedio)}` +
+    (r.gruposEmAlerta.length ? ` · ${r.gruposEmAlerta.length} grupo(s) abaixo de 0,65` : ' · nenhum grupo em alerta') +
+    (r.confiancaDisponivel ? '' : ' · sem posteriores da rede (confiança neutra)')
+  $('qc-panel').hidden = false
+}
+
 function renderSurfStats () {
   if (!state.surf) return
   const tb = $('surf-table')
@@ -1376,6 +1435,9 @@ async function runSegmentation () {
     state.native = null
     state.synthsr = null
     state.bet = null
+    state.qc = null
+    state.segConf = null
+    $('qc-panel').hidden = true
     // linha do tempo: uma nova execução invalida as etapas 02–05 anteriores
     for (const id of ['prep', 'synthsr', 'conform', 'bet', 'seg', 'dkt', 'surf']) tlRemove(id)
     viewCache.clear()
@@ -1491,7 +1553,9 @@ async function runSegmentation () {
     await applySegmentationResult(labelsPath, colormapPath)
     tlNote('seg', `${state.modelUsed} — ${isGPU ? 'GPU (WebGL)' : 'CPU'}`)
     if (state.stats) tlNote('seg', `volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³`)
-    tlDone('seg', [{ label: 'ver segmentação', view: 'seg' }])
+    const segViews = [{ label: 'ver segmentação', view: 'seg' }]
+    if (state.segConf) segViews.push({ label: 'mapa de confiança', view: 'confmap' })
+    tlDone('seg', segViews, state.qc && state.qc.resumo.gruposEmAlerta.length ? 'warn' : 'ok')
   } catch (e) {
     log('Erro: ' + e.message, 'err')
     if (/memory|memória|texture|alloc/i.test(String(e.message))) {
@@ -1676,6 +1740,7 @@ function metaNow () {
     quality: state.quality,
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
+    qc: state.qc ? { resumo: state.qc.resumo, grupos: state.qc.grupos } : null,
     surf: state.surf
       ? {
           regioes: state.surf.stats,
@@ -1753,6 +1818,12 @@ async function makeExports () {
       return await gzipBuffer(buf)
     },
     xfm: () => state.surf && state.surf.xfm ? state.surf.xfm : null,
+    qcCsv: () => state.qc ? qcToCSV(state.qc, meta, dec) : null,
+    niiConf: async () => {
+      if (!state.segConf) return null
+      const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm confianca da rede 0-255' }, state.segConf)
+      return await gzipBuffer(buf)
+    },
     niiMask: async () => {
       if (!state.bet) return null
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: `segmentarm mascara cerebral f=${state.bet.f}` }, state.bet.mask)
@@ -1767,7 +1838,7 @@ async function makeExports () {
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'nii-norm', 'xfm', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'nii-norm', 'xfm', 'qc-csv', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -1811,6 +1882,18 @@ async function handleExport (kind) {
         else log('Sem transformada de Talairach — rode o passo 05 (superfícies).', 'err')
         break
       }
+      case 'qc-csv': {
+        const b = ex.qcCsv()
+        if (b) saveBlob(b, `${sub}_qc.csv`, 'text/csv;charset=utf-8')
+        else log('Sem QC — rode a segmentação primeiro.', 'err')
+        break
+      }
+      case 'nii-conf': {
+        const b = await ex.niiConf()
+        if (b) saveBlob(b, `${sub}_confianca.nii.gz`)
+        else log('Sem mapa de confiança — a rede usada não devolve posteriores (só o SynthSeg).', 'err')
+        break
+      }
       case 'nii-brain': {
         const b = await ex.niiBrain()
         if (b) saveBlob(b, `${sub}_cerebro.nii.gz`)
@@ -1832,6 +1915,8 @@ async function handleExport (kind) {
           if (state.surf.xfm) files.push({ name: `${sub}_talairach.xfm`, data: new TextEncoder().encode(state.surf.xfm) })
           if (state.surf.norm) files.push({ name: `${sub}_norm_sintetico.nii.gz`, data: new Uint8Array(await ex.niiNorm()) })
         }
+        if (state.qc) files.push({ name: `${sub}_qc.csv`, data: ex.qcCsv() })
+        if (state.segConf) files.push({ name: `${sub}_confianca.nii.gz`, data: new Uint8Array(await ex.niiConf()) })
         if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
         if (state.synthsr) files.push({ name: `${sub}_synthsr_mprage.nii.gz`, data: new Uint8Array(await ex.niiSynthsr()) })
         if (state.bet) {

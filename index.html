@@ -213,6 +213,17 @@
       ver o entregável correspondente no visualizador.</p>
     </section>
 
+    <section class="panel" id="qc-panel" hidden>
+      <h3>QC da segmentação — por grupo tecidual</h3>
+      <div class="tablewrap" style="max-height:250px"><table id="qc-table"><thead></thead><tbody></tbody></table></div>
+      <p class="qc-sum" id="qc-summary"></p>
+      <p class="note">Escore = <b>confiança</b> (posterior máxima da rede) × <b>coesão</b> (fração no
+      maior componente conexo) × <b>simetria</b> (excesso de assimetria E/D). Grupos teciduais e
+      nomes são os do regressor de QC do <b>SynthSeg 2.0</b>, mas o escore é próprio — <b>não</b> é o
+      Dice predito daquele regressor. Calibre o corte na sua coorte; 0,65 é o do artigo, como
+      referência de partida.</p>
+    </section>
+
     <div id="results" hidden>
       <section class="panel">
         <h3>Agregados</h3>
@@ -268,6 +279,8 @@
         <button class="btn sm" data-export="nii-synthsr" disabled>MP-RAGE sintético</button>
         <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
+        <button class="btn sm" data-export="qc-csv" disabled title="QC por grupo tecidual (escore, confiança, coesão, simetria) — uma linha por exame, na forma do synthseg.qc.csv">QC .csv</button>
+        <button class="btn sm" data-export="nii-conf" disabled title="Mapa de confiança da rede (posterior máxima por voxel, 0–255)">Confiança .nii.gz</button>
         <button class="btn sm" data-export="nii-norm" disabled title="Imagem sintética de córtex super-resolvido derivada das SDFs (norm.mgz do recon-all-clinical)">Norm sintético</button>
         <button class="btn sm" data-export="xfm" disabled title="Transformada linear para o MNI por casamento de centros de massa (talairach.xfm)">talairach.xfm</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
