@@ -3,21 +3,42 @@ SynthDist / mri_synth_surf — rede de SDFs do recon-all-clinical
 Rede: Karthik Gopinath, Juan Eugenio Iglesias e colaboradores, Athinoula A.
 Martinos Center (MGH/Harvard) — distribuída como parte do FreeSurfer
 (https://github.com/freesurfer/freesurfer, diretório recon_all_clinical/;
-pesos: $FREESURFER_HOME/models/synthsurf_v10_230420.h5).
+pesos originais: $FREESURFER_HOME/models/synthsurf_v10_230420.h5).
 
-OS PESOS NÃO SÃO REDISTRIBUÍDOS COM O SEGMENTARM. O FreeSurfer é distribuído
-sob a FreeSurfer Software License Agreement (uso livre em pesquisa, com
-registro; sem redistribuição). Para usar a rede no SegmentaRM:
+PESOS INCLUÍDOS NESTE REPOSITÓRIO
+---------------------------------
+Por decisão do mantenedor, uma cópia REDUZIDA dos pesos acompanha o projeto,
+para que o passo 05 funcione sem instalação nem upload a cada uso:
 
-  1. Instale o FreeSurfer >= 7.4 (ou copie de uma instalação existente) e
-     localize $FREESURFER_HOME/models/synthsurf_v10_230420.h5
-     (159.148.696 bytes; sha256
-     f02f70dacb753c019ea590f5ca36617dc8ace32eb571c74ffc648c926ad7bbbc).
-  2. Converta: python3 tools/convert_synthsurf_tfjs.py \
-         --h5 caminho/para/synthsurf_v10_230420.h5 --out models/synthsurf
-  3. Sirva a pasta models/synthsurf/ junto do aplicativo. O passo 05 detecta o
-     model.json e passa a usar a rede; sem ela, o passo usa o fallback
-     declarado (SDF por transformada de distância exata das máscaras).
+  models/synthsurf_v10_fp16.h5   24,4 MB  checkpoint enxugado (ver abaixo)
+  models/synthsurf/              26,5 MB  o mesmo, convertido para TensorFlow.js
+
+O checkpoint original tem 159.148.696 bytes porque carrega o estado do
+otimizador Adam além dos pesos. `models/shrink_checkpoint.py` remove esse estado
+e converte as convoluções para float16, PRESERVANDO gamma, beta, moving_mean e
+moving_variance em float32 — as estatísticas de BatchNorm alimentam
+1/sqrt(var+eps) e a perda de precisão ali se propaga por toda a rede.
+`tools/convert_synthsurf_tfjs.py` aplica a mesma regra ao gerar o tfjs.
+
+Verificação da cópia (reproduzível):
+  · 28/28 camadas com pesos casaram com a arquitetura lida do mri_synth_surf.py
+  · 13.242.249 parâmetros; unet_likelihood com kernel (1,1,1,24,9) — os 9 canais
+    de SDF, dos quais o pipeline usa 0..3 — MEDIDOS como 0 = lh-pial,
+    1 = lh-white, 2 = rh-pial, 3 = rh-white, o inverso do que os nomes das
+    variáveis do mri_synth_surf.py sugerem (ver README, seção do passo 05)
+  · paridade tfjs × Keras: máx |Δ| = 7e-5 numa saída que varia de −65 a +22
+
+LICENÇA — LEIA ANTES DE REDISTRIBUIR
+------------------------------------
+A rede vem do FreeSurfer, distribuído sob a FreeSurfer Software License
+Agreement (https://surfer.nmr.mgh.harvard.edu/registration.html): uso livre em
+pesquisa e ensino, mediante registro, e com RESTRIÇÃO DE REDISTRIBUIÇÃO — ao
+contrário do SynthSeg e do SynthSR, que são Apache 2.0 e podem ser
+redistribuídos livremente. Quem for publicar um fork, um mirror ou um binário
+deste projeto deve conferir os termos vigentes e, se necessário, obter
+autorização do Martinos Center, ou remover models/synthsurf* e usar o caminho
+traga-seus-pesos (o conversor continua funcionando a partir de uma instalação
+local do FreeSurfer).
 
 Citações:
   Gopinath K, Greve DN, Magdamo C, Arnold S, Das S, Puonti O, Iglesias JE.
@@ -31,6 +52,6 @@ Citações:
 
 O restante do fluxo (partição hemisférica por EDT, imagem sintética norm,
 wm.seg/filled, Talairach por centros de massa, energia de colocação de
-superfícies) foi reimplementado em JavaScript a partir do código-fonte
-público do FreeSurfer (recon-all-clinical.sh e mri_synth_surf.py) e do artigo,
-sem copiar código C do FreeSurfer.
+superfícies) foi reimplementado em JavaScript a partir do código-fonte público
+do FreeSurfer (recon-all-clinical.sh e mri_synth_surf.py) e do artigo, sem
+copiar código C do FreeSurfer.

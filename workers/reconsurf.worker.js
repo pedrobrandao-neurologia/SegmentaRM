@@ -19,7 +19,7 @@ import { dilate6, erode6, largestComponent, fillCavities } from '../lib/fsl-prep
 import {
   signedSdfFromMask, hemispherePartition, accumulateSyntheticNorm, maskByDilatedSeg,
   buildNeighbors, eulerCharacteristic, trilinear, placeSurface, smoothMesh,
-  talairachFromSeg, talairachXfm
+  talairachFromSeg, talairachXfm, escolheCanaisSdf
 } from '../lib/sdf-surface.js'
 
 function post (frac, txt) { self.postMessage({ cmd: 'progress', frac, txt }) }
@@ -92,8 +92,9 @@ function permuteFromRAS (volRas, dimsRas, dims, map, Ctor = Float32Array) {
 
 // SDFs pela rede SynthDist (pesos convertidos pelo usuário — traga-seus-pesos):
 // recorte à caixa do encéfalo + margem, blocos 96³ com sobreposição e recorte
-// central, 9 canais de saída (0..3 = SDF lh-white, lh-pial, rh-white, rh-pial)
-async function netSdfs (img, seg, dims, affine, modelUrl, isGPU, tile) {
+// central, 9 canais de saída (0..3 = SDFs dos dois hemisférios; a atribuição
+// white/pial é decidida pelo próprio exame — ver o bloco no fim desta função)
+async function netSdfs (img, seg, ctxE, ctxD, ctxMask, dims, affine, modelUrl, isGPU, tile) {
   const tf = await import('../vendor/tf.fesm.min.js')
   const { registerUpSampling3D } = await import('../lib/tfjs-upsampling3d.js')
   registerUpSampling3D(tf)
@@ -166,8 +167,14 @@ async function netSdfs (img, seg, dims, affine, modelUrl, isGPU, tile) {
     }
     return permuteFromRAS(full, rd, dims, map)
   })
-  // ordem oficial: 0 lh-white, 1 lh-pial, 2 rh-white, 3 rh-pial
-  return { lhW: sdfs[0], lhP: sdfs[1], rhW: sdfs[2], rhP: sdfs[3] }
+  // Ordem dos canais decidida pelo próprio exame (ver escolheCanaisSdf).
+  const esc = escolheCanaisSdf(sdfs, ctxE, ctxD, ctxMask)
+  const me = esc.medidas.e, md = esc.medidas.d
+  post(0.6, `SynthDist: média da SDF no córtex — E white ${me.W.toFixed(2)} / pial ${me.P.toFixed(2)} mm · D white ${md.W.toFixed(2)} / pial ${md.P.toFixed(2)} mm.`)
+  post(0.6, esc.esperado
+    ? 'SynthDist: canais conferidos no exame (white = 1 e 3, pial = 0 e 2).'
+    : `SynthDist: ATENÇÃO — a ordem dos canais neste checkpoint difere da medida nos pesos v10 (white detectada em ${esc.ordem.e} e ${esc.ordem.d}); seguindo o que o exame indica.`)
+  return { lhW: esc.lhW, lhP: esc.lhP, rhW: esc.rhW, rhP: esc.rhP }
 }
 
 self.onmessage = async (ev) => {
@@ -211,12 +218,13 @@ self.onmessage = async (ev) => {
     const white = [new Uint8Array(n), new Uint8Array(n)]
     const pial = [new Uint8Array(n), new Uint8Array(n)]
     const ctxMask = new Uint8Array(n)
+    const ctxH = [new Uint8Array(n), new Uint8Array(n)]
     for (let v = 0; v < n; v++) {
       const c = cls[seg[v]]
       if (!c) continue
       const hi = (c.hemi === 1 || (c.hemi === 0 && side[v])) ? 0 : 1
       if (c.kind === 'wm' || c.kind === 'vent' || c.kind === 'sub') { white[hi][v] = 1; pial[hi][v] = 1 }
-      else { pial[hi][v] = 1; if (c.kind === 'ctx') ctxMask[v] = 1 }
+      else { pial[hi][v] = 1; if (c.kind === 'ctx') { ctxMask[v] = 1; ctxH[hi][v] = 1 } }
     }
 
     // SDFs — rede SynthDist (se instalada) ou EDT das máscaras (fallback declarado)
@@ -224,7 +232,7 @@ self.onmessage = async (ev) => {
     let engineUsed = 'edt'
     if (engine === 'net' && modelUrl) {
       try {
-        sdf = await netSdfs(img, segMask, dims, affine, modelUrl, isGPU, tile)
+        sdf = await netSdfs(img, segMask, ctxH[0], ctxH[1], ctxMask, dims, affine, modelUrl, isGPU, tile)
         engineUsed = 'net'
       } catch (e) {
         post(0.06, `Rede SynthDist indisponível (${e.message}) — usando SDF por EDT das máscaras.`)
