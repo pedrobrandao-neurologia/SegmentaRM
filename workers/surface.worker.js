@@ -9,7 +9,7 @@
 // Mensagem: { seg, dims, affine (flat16), labels {idx→nome}, colormap {R,G,B,I}, voxVol }
 // Resposta: { cmd:'done', meshes:[{name,kind,hemi,mz3}], stats:[...], caveat }
 
-import { surfaceNets, taubinSmooth, meshAreas, applyAffine, writeMz3 } from '../lib/surfaces.js'
+import { surfaceNets, taubinSmooth, meshAreas, applyAffine, writeMz3, facesForAffine } from '../lib/surfaces.js'
 import { dilate6, erode6, largestComponent, fillCavities } from '../lib/fsl-prep.js'
 
 function post (frac, txt) { self.postMessage({ cmd: 'progress', frac, txt }) }
@@ -216,7 +216,8 @@ self.onmessage = async (ev) => {
             if (parc) areaByLabel.set(parc, (areaByLabel.get(parc) || 0) + per[f / 3])
           }
         }
-        const mz3 = writeMz3(mmv, faces, rgba)
+        // normais para fora no espaço RAS (a conformação LIA tem det < 0)
+        const mz3 = writeMz3(mmv, facesForAffine(faces, A), rgba)
         meshes.push({ name: `${h === 0 ? 'lh' : 'rh'}.${kind}`, kind, hemi: h === 0 ? 'E' : 'D', mz3 })
         post(0.2 + h * 0.35 + (kind === 'white' ? 0.15 : 0.3), `Hemisfério ${names[h]}: ${kind} com ${(mmv.length / 3).toLocaleString()} vértices.`)
       }
