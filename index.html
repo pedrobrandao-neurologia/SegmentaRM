@@ -113,6 +113,7 @@
           </select>
         </div>
       </div>
+      <label class="check" title="Test-time flipping do predict.py oficial: média dos posteriores com os do volume espelhado E/D (rótulos trocados). Ligado no oficial; dobra o tempo da segmentação"><input type="checkbox" id="opt-synthseg-flip" checked> SynthSeg: média com o volume espelhado E/D <span class="eq">como o oficial</span></label>
       <button class="btn primary" id="run" disabled>Segmentar</button>
       <button class="btn ghost" id="cancel" hidden title="Interrompe a etapa em execução e libera a memória do worker; o exame carregado permanece">Cancelar etapa</button>
       <button class="btn" id="run-clinical" disabled title="Encadeia os passos 03→04→05 no fluxo do recon-all-clinical: SynthSeg → parcelação DKT (FastSurferCNN) → superfícies por SDF com espessura, norm sintético e talairach.xfm">Pipeline completo <span class="eq">recon-all-clinical</span></button>

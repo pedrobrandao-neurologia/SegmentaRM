@@ -53,6 +53,7 @@ const state = {
   native: null,        // { vol: NVImage, prov } — pré-processado no espaço nativo
   synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
   segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
+  segVolSoft: null,    // Float64Array — volume soft por canal do SynthSeg (voxels; soma dos posteriors, como o --vol oficial)
   qc: null,            // { grupos, estruturas, resumo } — QC por grupo tecidual
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
@@ -840,6 +841,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.seg = null
   state.segKind = null
   state.segConf = null
+  state.segVolSoft = null
   state.labelsMap = null
   state.colormap = null
   state.stats = null
@@ -1055,6 +1057,7 @@ function runWorker (url, message, pFrom, pTo) {
         // pode apagar a confiança da segmentação que ele está refinando; a limpeza
         // por execução fica no início de runSegmentation.
         if (d.conf) state.segConf = new Uint8Array(d.conf)
+        if (d.volumes) state.segVolSoft = new Float64Array(d.volumes)
         log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
         resolve(new Uint8Array(d.img))
       }
@@ -1065,7 +1068,8 @@ function runWorker (url, message, pFrom, pTo) {
 }
 
 function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = null) {
-  log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³…`)
+  const flip = !$('opt-synthseg-flip') || $('opt-synthseg-flip').checked
+  log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³${flip ? ', média com o volume espelhado E/D (como o predict.py oficial)' : ', sem espelhamento'}…`)
   return runWorker('./workers/synthseg.worker.js', {
     modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
     img: imgOverride || conformed.img,
@@ -1073,7 +1077,8 @@ function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = nul
     affine: affineOf(conformed),
     isGPU,
     tile,
-    overlap: 32
+    overlap: 32,
+    flip
   }, pFrom, pTo)
 }
 
@@ -1223,6 +1228,15 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     progress(0.95)
     await yieldUI()
     state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
+    // SynthSeg: volume soft por estrutura (soma dos posteriors), a convenção do --vol
+    // oficial; só vale para a segmentação da própria rede (o DKT troca os rótulos)
+    if (state.segKind === 'synthseg' && state.segVolSoft) {
+      const vv = state.stats.voxVol || voxVolOf(state.conformed)
+      for (const r of state.stats.rows) {
+        if (r.index > 0 && r.index < state.segVolSoft.length) r.volSoftMm3 = state.segVolSoft[r.index] * vv
+      }
+      state.stats.volumeSoft = true
+    }
     renderResults()
     await yieldUI()
     // QC automático por grupo tecidual (grupos do regressor do SynthSeg 2.0)
@@ -1596,14 +1610,22 @@ async function runSegmentation () {
     for (const id of ['prep', 'synthsr', 'conform', 'bet', 'seg', 'dkt', 'surf']) tlRemove(id)
     // etapas nativas (≈ FSL), antes da conformação: reorientação → recorte → reamostragem
     // (só no robusto) → viés → suavização — a imagem corrigida alimenta todo o resto
+    // o SynthSeg (predict.py oficial) recebe a imagem crua: a rede foi treinada com
+    // campos de viés e resoluções sintéticos, e a correção de viés/reamostragem
+    // clássicas antes dela só afastam o resultado do oficial
+    const isSynthSeg = $('model').value === 'synthseg'
     const flags = {
       doReorient: $('opt-reorient').checked,
       doCrop: $('opt-crop').checked,
-      doResample: pipeline === 'robust',
-      doBias: $('opt-bias').checked,
+      doResample: pipeline === 'robust' && !isSynthSeg,
+      doBias: $('opt-bias').checked && !isSynthSeg,
       doSmooth: $('opt-smooth').checked
     }
+    const skipped = isSynthSeg && ($('opt-bias').checked || pipeline === 'robust')
     let workVol = state.rawVol
+    if (skipped) {
+      log('SynthSeg: correção de viés e reamostragem clássica NÃO aplicadas — a rede recebe a imagem crua, como no predict.py oficial (é robusta a viés e resolução por treino).')
+    }
     if (flags.doReorient || flags.doCrop || flags.doResample || flags.doBias || flags.doSmooth) {
       tlStage('prep', '02 · Pré-processamento nativo')
       tlNote('prep', [flags.doReorient && 'reorientação RAS', flags.doCrop && 'recorte de pescoço',
@@ -1678,6 +1700,9 @@ async function runSegmentation () {
     // extração cerebral (≈ BET) sobre o volume conformado, antes da segmentação;
     // a rede recebe o cérebro extraído (e normalizado, se marcado)
     let infImg = null
+    if ($('opt-bet').checked && kind === 'synthseg') {
+      log('Nota: o SynthSeg oficial segmenta a cabeça inteira (foi treinado assim); a extração cerebral antes dele é opcional e afasta o resultado do oficial.')
+    }
     if ($('opt-bet').checked && kind !== 'mask') {
       tlStage('bet', 'Extração cerebral (≈ BET)')
       await runBrainExtraction(conformed, isGPU, variant)
