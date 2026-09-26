@@ -358,6 +358,18 @@ parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 vira aler
 erro de segmentação** no painel e no PDF. As normas foram ajustadas em volumes FreeSurfer;
 os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clínico.
 
+**Estruturas subcorticais regionais.** Tálamo, caudado, putâmen, pálido, hipocampo,
+amígdala e accumbens, por **hemisfério e sexo**, são comparados com os modelos GAMLSS do
+**CentileBrain** (Ge et al., *Lancet Digit Health* 2024; grupo ENIGMA Lifespan de Dima et
+al., *Hum Brain Mapp* 2022; ~36 mil controles, 3–90 anos, FreeSurfer aseg harmonizado por
+ComBat-GAM). Os centis foram tirados offline dos modelos oficiais
+(`tools/extract_centilebrain_subcortical.R` → `models/normative/subcortical.json`) e o JS
+reproduz o R com erro de z ≤ 0,003 entre P5 e P95. Ressalvas: o SynthSeg difere do aseg de
+forma sistemática por estrutura (o z pode ter viés), não há ajuste por volume intracraniano
+e o exame isolado não passa pela harmonização do treino. O repositório CentileBrain não traz
+licença explícita (apenas "for research purpose"); os centis são redistribuídos aqui para
+pesquisa, com citação — confirme com os autores antes de uso comercial.
+
 **DKT × normas DK.** As normas regionais dos brain charts são do atlas **DK**; o protocolo
 **DKT** (Klein & Tourville, *Front Neurosci* 2012) eliminou bankssts, frontalpole e
 temporalpole, cujo tecido foi absorvido pelas regiões adjacentes sem partilha definida.
@@ -455,6 +467,7 @@ models/synthsurf/                      SynthDist em tfjs f16 (26,5 MB) + fixture
 models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts de redução
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
+models/normative/subcortical.json      centis subcorticais (CentileBrain)
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
 tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
@@ -546,6 +559,11 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
 - **Brain charts** — Bethlehem, Seidlitz, White et al.
   ([brainchart/Lifespan](https://github.com/brainchart/Lifespan)). Cite *Brain charts for
   the human lifespan* (Nature, 2022).
+- **CentileBrain** — Ge, Yu, Qi et al.
+  ([CentileBrain/centilebrain](https://github.com/CentileBrain/centilebrain), sem licença
+  explícita; uso em pesquisa): normas subcorticais regionais. Cite *Normative modelling of
+  brain morphometry across the lifespan with CentileBrain* (Lancet Digit Health, 2024) e
+  Dima et al., *Subcortical volumes across the lifespan* (Hum Brain Mapp, 2022).
 - **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT):
   worker de inferência e modelos MeshNet.
 - **NiiVue** e **dcm2niix** — Rorden e colaboradores.

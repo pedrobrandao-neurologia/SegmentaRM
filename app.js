@@ -2015,9 +2015,15 @@ function renderNorms () {
   const tbody = $('norm-table').querySelector('tbody')
   thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th></th></tr>'
   tbody.innerHTML = ''
-  const rows = [...n.globals, ...n.lobes]
+  const sub = n.subcorticais || []
+  const rows = [...n.globals, ...n.lobes, ...(sub.length ? [{ sep: 'Subcorticais — CentileBrain (por hemisfério)' }] : []), ...sub]
   for (const g of rows) {
     const tr = document.createElement('tr')
+    if (g.sep) {
+      tr.innerHTML = `<td colspan="5" style="color:var(--muted);font-family:var(--mono);font-size:10.5px;padding-top:8px">${g.sep}</td>`
+      tbody.appendChild(tr)
+      continue
+    }
     const flagTxt = g.flag === 'erro?' ? '⚠ erro?' : g.flag === 'atipico' ? '· atípico' : ''
     tr.innerHTML = `<td>${g.pt}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
@@ -2025,6 +2031,16 @@ function renderNorms () {
       `<td class="num">${g.z != null ? (g.z >= 0 ? '+' : '') + g.z.toFixed(2) : '—'}</td>` +
       `<td style="color:${g.flag === 'erro?' ? 'var(--accent-strong)' : 'var(--warn)'};font-family:var(--mono);font-size:10.5px">${flagTxt}</td>`
     tbody.appendChild(tr)
+  }
+  const info = n.subcorticalInfo
+  const note = $('norm-sub-note')
+  if (note) {
+    note.hidden = !info
+    if (info) {
+      note.textContent = 'Subcorticais: CentileBrain (Ge et al., Lancet Digit Health 2024; ENIGMA Lifespan), ' +
+        'GAMLSS por sexo e hemisfério, volumes FreeSurfer aseg — o SynthSeg difere sistematicamente do aseg; sem ajuste por VIC.' +
+        (info.foraDaFaixaEtaria ? ` Idade fora da faixa de treino (${info.faixaTreino.map(v => v.toFixed(0)).join('–')} anos): usada a curva da borda.` : '')
+    }
   }
 }
 
