@@ -1,18 +1,18 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v17'
+const CACHE = 'segmentarm-v18'
 const SHELL = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './manifest.webmanifest',
-  './icons/icon.svg',
+  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
   './lib/labels.js', './lib/quality.js', './lib/stats.js', './lib/nifti-writer.js',
   './lib/sav.js', './lib/pdf.js', './lib/zip.js', './lib/report.js',
   './workers/preprocess.worker.js', './workers/synthseg.worker.js',
-  './workers/mask.worker.js', './workers/fastsurfer.worker.js', './workers/surface.worker.js',
+  './workers/mask.worker.js', './workers/fastsurfer.worker.js',
   './workers/synthsr.worker.js', './workers/reconsurf.worker.js',
   './lib/surfaces.js', './lib/synthsr-core.js', './lib/sdf-surface.js', './lib/segqc.js',
   './lib/synthseg-core.js', './lib/tfjs-upsampling3d.js', './lib/fastsurfer-core.js',
@@ -42,11 +42,15 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return
   const url = new URL(e.request.url)
   if (url.origin !== location.origin) return
+  // navegação ignora a query (?mockbet etc.) para abrir offline pelo casco em cache
+  const opts = e.request.mode === 'navigate' ? { ignoreSearch: true } : undefined
   e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
-      if (resp.ok) {
+    caches.match(e.request, opts).then(hit => hit || fetch(e.request).then(resp => {
+      // só respostas completas: 206 (Range) faz cache.put lançar; cota cheia também —
+      // falhar ao guardar não pode derrubar a resposta
+      if (resp.status === 200 && !e.request.headers.has('range')) {
         const copy = resp.clone()
-        caches.open(CACHE).then(c => c.put(e.request, copy))
+        e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}))
       }
       return resp
     }))

@@ -59,6 +59,7 @@ const state = {
   wl: null,            // janela de exibição atual { min, max } do volume base
   wlRange: 255,        // amplitude de referência (p99−p1) para escalar o arrasto
   rebuilding: false,
+  clinicalChain: false, // pipeline completo 03→04→05 em curso (mantém o botão travado entre etapas)
   cohort: []
 }
 
@@ -74,6 +75,71 @@ function log (txt, cls = '') {
 }
 function progress (frac) {
   $('progress').style.width = Math.max(0, Math.min(100, frac * 100)) + '%'
+}
+
+// devolve a thread principal ao navegador entre blocos síncronos pesados (conformação,
+// fusão, estatísticas, QC) para a UI pintar o progresso e responder a cliques;
+// scheduler.yield não sofre o estrangulamento de timers em aba oculta
+function yieldUI () {
+  try { if (globalThis.scheduler && typeof scheduler.yield === 'function') return scheduler.yield() } catch { /* segue com timer */ }
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+// ---------- tarefas em Web Worker: registro único para cancelar e liberar memória ----------
+// cada worker de etapa registra-se aqui; "Cancelar" termina o worker (libera a
+// memória e a GPU dele na hora) e rejeita a promessa pendente com err.cancelled
+const jobs = new Set()
+let cancelPending = false // pedido feito num trecho sem worker: vale para o próximo
+function cancelledError () {
+  const err = new Error('etapa cancelada pelo usuário')
+  err.cancelled = true
+  return err
+}
+function trackWorker (w, reject) {
+  const job = { w, reject }
+  if (cancelPending) {
+    cancelPending = false
+    try { w.terminate() } catch { /* nada */ }
+    queueMicrotask(() => reject(cancelledError()))
+    return () => {}
+  }
+  jobs.add(job)
+  return () => { jobs.delete(job); try { w.terminate() } catch { /* já terminado */ } }
+}
+function cancelJobs () {
+  if (!jobs.size) { cancelPending = state.running; return false }
+  for (const job of [...jobs]) {
+    jobs.delete(job)
+    try { job.w.terminate() } catch { /* já terminado */ }
+    job.reject(cancelledError())
+  }
+  state.worker = null
+  return true
+}
+
+// estado dos botões de etapa num só lugar — derivado do estado, não de cada caminho
+function syncButtons () {
+  const busy = state.running
+  const has = (id) => !!$(id)
+  $('run').disabled = busy || !state.rawVol
+  if (has('run-clinical')) $('run-clinical').disabled = busy || state.clinicalChain || !state.rawVol
+  $('run-dkt').disabled = busy || !(state.seg && DKT_SOURCES[state.segKind])
+  $('run-surf').disabled = busy || !(state.seg && /-dkt$/.test(state.segKind || ''))
+  $('show-surf').disabled = !state.surf
+  if (has('cancel')) $('cancel').hidden = !busy
+  for (const id of ['pick-file', 'pick-folder', 'load-example']) if (has(id)) $(id).disabled = busy
+  if (has('series')) $('series').disabled = busy
+}
+function setBusy (on) {
+  state.running = on
+  if (!on) cancelPending = false
+  syncButtons()
+}
+// entrada nova no meio de uma etapa corromperia o estado (a etapa terminaria sobre outro exame)
+function refuseWhileBusy () {
+  if (!state.running) return false
+  log('Há uma etapa em execução — aguarde terminar ou clique em "Cancelar" antes de abrir outro exame.', 'err')
+  return true
 }
 
 // ---------- log de erros exportável + tutorial em pop-up ----------
@@ -187,7 +253,7 @@ const ERROR_GUIDES = [
       'Nada foi perdido: o resultado anterior permanece intacto.',
     passos: [
       'Confira no visualizador se o overlay mostra as parcelas coloridas do DKT nos DOIS hemisférios (isso indica que o passo 04 concluiu).',
-      'Re-rode o passo 04 · Parcelação DKT. Se falhar ou parcelar só um lado, troque a fonte (FastSurfer 3 vistas ↔ axial+coronal ↔ rede brainchop) ou mude Execução para CPU / Memória para Baixa.',
+      'Re-rode o passo 04 · Parcelação DKT. Se falhar ou parcelar só um lado, troque a fonte (FastSurfer 3 vistas ↔ axial+coronal ↔ rede brainchop) ou mude Memória para Baixa mantendo a GPU (WebGL). Evite CPU no FastSurfer: leva horas — se não houver GPU, prefira a fonte axial+coronal ou a rede brainchop.',
       'Entrada de baixa qualidade ou não-T1 (régua C/D)? Reprocesse desde o passo 03 com "MP-RAGE sintético 1 mm (SynthSR)" marcado no passo 02.',
       'Com o DKT refeito, rode o passo 05 · Superfícies de novo. Se só um hemisfério tiver parcelas, o passo agora prossegue com esse lado e avisa no console.',
       'Se o problema persistir, baixe o log de erro abaixo e anexe ao reportar — ele registra o contexto completo para diagnóstico.'
@@ -201,8 +267,9 @@ const ERROR_GUIDES = [
       'etapa anterior permanece intacto.',
     passos: [
       'Troque "Memória" para Baixa (blocos menores) e rode a etapa de novo.',
-      'Se repetir, troque "Execução" para CPU — mais lento, porém estável.',
-      'Feche outras abas e aplicativos pesados; em estudos DICOM grandes, abra só a série necessária na triagem.',
+      'Feche outras abas e rode de novo na GPU — a GPU (WebGL) é o caminho viável para todas as redes.',
+      'Só então troque "Execução" para CPU: estável, porém lento (SynthSeg: vários minutos; FastSurfer/DKT: horas — nele prefira a fonte axial+coronal ou a rede brainchop).',
+      'Em estudos DICOM grandes, abra só a série necessária na triagem.',
       'Se o visualizador ficar branco, ele se recupera sozinho; aguarde ou recarregue a página (o cache offline preserva os modelos).',
       'Persistindo, baixe o log de erro abaixo e anexe ao reportar.'
     ]
@@ -214,7 +281,7 @@ const ERROR_GUIDES = [
       'intacto e você pode rodar a etapa novamente.',
     passos: [
       'Rode a etapa novamente — falhas transitórias (memória, GPU ocupada) costumam sumir.',
-      'Se repetir, troque "Execução" para CPU ou "Memória" para Baixa.',
+      'Se repetir, troque "Memória" para Baixa; CPU só como último recurso (lento — no FastSurfer/DKT, horas).',
       'Confira a régua de qualidade (passo 02): entrada não-T1 ou muito anisotrópica degrada todas as redes — considere o SynthSR.',
       'Baixe o log de erro abaixo — ele registra o contexto completo (entrada, seleções, mensagens) para diagnóstico e para reprocessar depois.'
     ]
@@ -242,6 +309,12 @@ function showErrorDialog (etapa, err) {
 
 // registra e explica um erro de etapa num só lugar
 function stepError (etapa, err, diagnostico = null) {
+  if (err && err.cancelled) {
+    // cancelamento é escolha do usuário: sem pop-up nem registro no log de erros
+    const key = TL.current
+    if (key) { tlNote(key, 'cancelada pelo usuário', 'warn'); tlDone(key, [], 'warn') }
+    return
+  }
   recordError(etapa, err, diagnostico)
   showErrorDialog(etapa, err)
   tlFail(null, err, etapa)
@@ -542,7 +615,9 @@ async function rebuildViewer () {
     }
     if (state.wl) applyWindow(state.wl.min, state.wl.max)
     else autoWindow()
-    applySliceType()
+    // as malhas viviam no contexto perdido: recarrega se o 3D estava ativo
+    if (state.surf && $('show-surf').checked) await showSurfaces(true)
+    else applySliceType()
     log('Visualizador restaurado.', 'ok')
   } catch (e) {
     log('Não consegui restaurar o visualizador: ' + e.message, 'err')
@@ -569,7 +644,10 @@ function deviceBadge () {
       const dbg = gl.getExtension('WEBGL_debug_renderer_info')
       const name = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'WebGL2'
       el.textContent = String(name).slice(0, 34)
+      el.title = String(name)
       el.dataset.gpu = '1'
+      // libera o contexto de sonda (o navegador limita contextos WebGL vivos por aba)
+      try { const lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext() } catch { /* sem extensão */ }
       return
     }
   } catch { /* sem WebGL */ }
@@ -625,6 +703,7 @@ function showSeriesPicker (groups, totalFiles) {
  * em estudos com milhares de arquivos).
  */
 async function handleDicomInput (allFiles) {
+  if (refuseWhileBusy()) return
   log(`Lendo cabeçalhos de ${allFiles.length} arquivo(s) DICOM (triagem por série)…`)
   progress(0.03)
   let groups = []
@@ -650,12 +729,20 @@ async function handleDicomInput (allFiles) {
     const g = plan.selected[i]
     progress(0.15 + 0.75 * (i / plan.selected.length))
     try {
+      let done = false
       if (plan.direct && g.supportedDirect) {
         log(`Série "${g.desc}": leitura direta (${g.count} cortes, ${(g.bytes / 1048576).toFixed(0)} MB)…`)
-        const { file, sidecar } = await directSeriesToNifti(g, (k, n) =>
-          progress(0.15 + 0.75 * ((i + k / n) / plan.selected.length)))
-        entries.push({ file, sidecar })
-      } else {
+        try {
+          const { file, sidecar } = await directSeriesToNifti(g, (k, n) =>
+            progress(0.15 + 0.75 * ((i + k / n) / plan.selected.length)))
+          entries.push({ file, sidecar })
+          done = true
+        } catch (err) {
+          // leitura direta cobre só o caso simples; o dcm2niix é o caminho geral
+          log(`Série "${g.desc}": leitura direta falhou (${err.message}) — tentando o dcm2niix…`, 'err')
+        }
+      }
+      if (!done) {
         log(`Série "${g.desc}": convertendo com dcm2niix (${g.count} arquivos)…`)
         entries.push(await convertDicom(g.files))
       }
@@ -680,7 +767,7 @@ async function handleDicomInput (allFiles) {
   sel.value = String(best)
   sel.onchange = async () => {
     const en = entries[+sel.value]
-    await loadVolumeFile(en.file, en.sidecar, `DICOM → ${en.file.name}`)
+    try { await loadVolumeFile(en.file, en.sidecar, `DICOM → ${en.file.name}`) } catch (err) { log('Erro ao abrir a série: ' + err.message, 'err'); progress(0) }
   }
   const en = entries[best]
   await loadVolumeFile(en.file, en.sidecar, `DICOM → ${en.file.name}`)
@@ -690,8 +777,20 @@ async function convertDicom (files) {
   log(`Convertendo ${files.length} arquivos DICOM com dcm2niix (WASM)…`)
   progress(0.05)
   const d = new Dcm2niix()
-  await d.init()
-  const out = await d.input(files).b('y').z('n').f('%p_%s_%d').run()
+  let out
+  try {
+    await d.init()
+    // o wrapper não escuta 'error' durante run(): um abort do WASM (memória) deixaria
+    // a promessa pendente para sempre — corre contra o evento de erro do worker
+    const crashed = new Promise((resolve, reject) => {
+      d.worker.addEventListener('error', (e) => reject(new Error('dcm2niix interrompido: ' + (e.message || 'falha no worker (memória?)'))))
+    })
+    out = await Promise.race([d.input(files).b('y').z('n').f('%p_%s_%d').run(), crashed])
+  } finally {
+    // cada conversão cria um worker com heap WASM próprio (centenas de MB em estudos
+    // grandes); os File de saída já foram clonados para esta thread
+    try { if (d.worker) d.worker.terminate() } catch { /* já terminado */ }
+  }
   const niis = out.filter(f => /\.nii$/i.test(f.name))
   const jsons = out.filter(f => /\.json$/i.test(f.name))
   if (!niis.length) throw new Error('dcm2niix não produziu nenhum NIfTI — a pasta contém uma série de imagem suportada?')
@@ -721,35 +820,55 @@ async function convertDicom (files) {
   sel.value = best
   sel.onchange = async () => {
     const f = niis[+sel.value]
-    await loadVolumeFile(f, await readSidecar(f), `DICOM → ${f.name}`)
+    try { await loadVolumeFile(f, await readSidecar(f), `DICOM → ${f.name}`) } catch (err) { log('Erro ao abrir a série: ' + err.message, 'err'); progress(0) }
   }
   const f = niis[best]
   return { file: f, sidecar: await readSidecar(f) }
 }
 
+// descarta tudo o que deriva de uma segmentação (e, com withConformed, a conformação
+// e os intermediários): nada de estatística/exportação de uma execução ficar pareado
+// com o volume de outra — ex.: refazer o 03 com outras opções e ele falhar no meio
+async function clearSegmentationState ({ withConformed = false } = {}) {
+  if (withConformed) {
+    state.conformed = null
+    state.native = null
+    state.synthsr = null
+    state.bet = null
+    state.pipelineUsed = ''
+  }
+  state.seg = null
+  state.segKind = null
+  state.segConf = null
+  state.labelsMap = null
+  state.colormap = null
+  state.stats = null
+  state.norms = null
+  state.qc = null
+  state.surf = null
+  state.modelUsed = ''
+  viewCache.clear()
+  $('show-surf').checked = false
+  if (state.nv && state.nv.meshes && state.nv.meshes.length) await showSurfaces(false)
+  $('surf-panel').hidden = true
+  $('qc-panel').hidden = true
+  $('norm-panel').hidden = true
+  $('results').hidden = true
+  $('step-export').hidden = true
+  delete $('step-run').dataset.done
+  updateIntermediateExports()
+  syncButtons()
+}
+
 async function loadVolumeFile (file, sidecar, desc) {
+  if (refuseWhileBusy()) return
   progress(0.15)
   const vol = await NVImage.loadFromFile({ file, name: file.name })
   const nv = state.nv
   while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
   await nv.addVolume(vol)
   state.rawVol = vol
-  state.conformed = null
-  state.seg = null
-  state.segKind = null
-  state.stats = null
-  state.native = null
-  state.synthsr = null
-  state.bet = null
-  state.surf = null
-  state.qc = null
-  state.segConf = null
-  $('run-dkt').disabled = true
-  $('run-surf').disabled = true
-  $('show-surf').disabled = true
-  $('show-surf').checked = false
-  $('surf-panel').hidden = true
-  $('qc-panel').hidden = true
+  await clearSegmentationState({ withConformed: true })
   state.sidecar = sidecar || null
   state.inputDesc = desc
   state.wl = null
@@ -766,8 +885,7 @@ async function loadVolumeFile (file, sidecar, desc) {
   renderQuality(state.quality)
   $('step-quality').hidden = false
   $('step-run').hidden = false
-  $('run').disabled = false
-  if ($('run-clinical')) $('run-clinical').disabled = false
+  syncButtons()
   $('stage-title').textContent = ($('subject').value || file.name.replace(/\.nii(\.gz)?$/i, ''))
   $('stage-lede').textContent = `${desc} — ${dims.join('×')} voxels de ${pixDims.map(p => Math.abs(p).toFixed(2)).join('×')} mm. ` +
     `Régua de qualidade: nível ${state.quality.grade} (${state.quality.gradeTxt}).`
@@ -840,19 +958,25 @@ async function preprocessNative (vol, flags) {
   for (let i = 0; i < src.length; i++) src[i] = vol.img[i] * slope + inter
   const A = affineOf(vol)
   const worker = new Worker('./workers/preprocess.worker.js', { type: 'module' })
-  const result = await new Promise((resolve, reject) => {
-    worker.onmessage = (ev) => {
-      const m = ev.data
-      if (m.cmd === 'progress') { log('· ' + m.txt); progress(0.15 + m.frac * 0.2) }
-      else if (m.cmd === 'done') resolve(m)
-      else if (m.cmd === 'error') reject(new Error(m.message))
-    }
-    worker.onerror = (e) => reject(new Error(e.message || 'falha no worker de pré-processamento'))
-    worker.postMessage({
-      data: src, dims, pixDims, affine: A.flat(), targetIso: 1.0, ...flags
-    }, [src.buffer])
-  })
-  worker.terminate()
+  let release = () => {}
+  let result
+  try {
+    result = await new Promise((resolve, reject) => {
+      release = trackWorker(worker, reject)
+      worker.onmessage = (ev) => {
+        const m = ev.data
+        if (m.cmd === 'progress') { log('· ' + m.txt); progress(0.15 + m.frac * 0.2) }
+        else if (m.cmd === 'done') resolve(m)
+        else if (m.cmd === 'error') reject(new Error(m.message))
+      }
+      worker.onerror = (e) => reject(new Error(e.message || 'falha no worker de pré-processamento'))
+      worker.postMessage({
+        data: src, dims, pixDims, affine: A.flat(), targetIso: 1.0, ...flags
+      }, [src.buffer])
+    })
+  } finally {
+    release() // termina o worker também no erro (antes vazava a cópia float32 do volume)
+  }
   const newA = [0, 1, 2, 3].map(r => result.affine.slice(r * 4, r * 4 + 4))
   const buf = writeNifti({ dims: result.dims, pixDims: result.pixDims, affine: newA, datatype: 'float32', description: 'segmentarm preproc nativo' }, result.data)
   const file = new File([buf], 'preprocessado.nii')
@@ -867,18 +991,20 @@ function runSynthsrWorker (message, pFrom, pTo) {
   return new Promise((resolve, reject) => {
     const w = new Worker('./workers/synthsr.worker.js', { type: 'module' })
     state.worker = w
+    const release = trackWorker(w, reject)
+    const end = () => { release(); state.worker = null }
     w.onmessage = (ev) => {
       const d = ev.data
       if (d.cmd === 'ui') {
         if (d.message) log('· ' + d.message)
         if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
-        if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+        if (d.modalMessage) { end(); reject(new Error(d.modalMessage)) }
       } else if (d.cmd === 'img') {
-        w.terminate(); state.worker = null
+        end()
         resolve(d)
       }
     }
-    w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker SynthSR')) }
+    w.onerror = (e) => { end(); reject(new Error(e.message || 'falha no worker SynthSR')) }
     w.postMessage(message, [message.img.buffer])
   })
 }
@@ -912,15 +1038,17 @@ function runWorker (url, message, pFrom, pTo) {
   return new Promise((resolve, reject) => {
     const w = new Worker(url, { type: 'module' })
     state.worker = w
+    const release = trackWorker(w, reject)
+    const end = () => { release(); state.worker = null }
     const t0 = performance.now()
     w.onmessage = (ev) => {
       const d = ev.data
       if (d.cmd === 'ui') {
         if (d.message) log('· ' + d.message)
         if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
-        if (d.modalMessage) { w.terminate(); state.worker = null; reject(new Error(d.modalMessage)) }
+        if (d.modalMessage) { end(); reject(new Error(d.modalMessage)) }
       } else if (d.cmd === 'img') {
-        w.terminate(); state.worker = null
+        end()
         // posterior máxima por voxel (0–255), quando a rede a devolve: é a
         // confiança usada pelo QC por grupo tecidual. Só sobrescreve quando vem —
         // o passo DKT roda outra rede (FastSurfer/brainchop, sem posteriores) e não
@@ -931,7 +1059,7 @@ function runWorker (url, message, pFrom, pTo) {
         resolve(new Uint8Array(d.img))
       }
     }
-    w.onerror = (e) => { w.terminate(); state.worker = null; reject(new Error(e.message || 'falha no worker de segmentação')) }
+    w.onerror = (e) => { end(); reject(new Error(e.message || 'falha no worker de segmentação')) }
     w.postMessage(message)
   })
 }
@@ -977,13 +1105,14 @@ function runBrainchopModel (modelId, conformed, isGPU, pFrom, pTo, { imgOverride
 function runMaskWorker ({ prob, intensity, dims, f, normalize }) {
   return new Promise((resolve, reject) => {
     const w = new Worker('./workers/mask.worker.js', { type: 'module' })
+    const release = trackWorker(w, reject)
     w.onmessage = (ev) => {
       const m = ev.data
       if (m.cmd === 'progress') { log('· ' + m.txt); progress(0.72 + m.frac * 0.06) }
-      else if (m.cmd === 'done') { w.terminate(); resolve(m) }
-      else if (m.cmd === 'error') { w.terminate(); reject(new Error(m.message)) }
+      else if (m.cmd === 'done') { release(); resolve(m) }
+      else if (m.cmd === 'error') { release(); reject(new Error(m.message)) }
     }
-    w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'falha no worker de máscara')) }
+    w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker de máscara')) }
     w.postMessage({ prob, intensity: Uint8Array.from(intensity), dims, f, normalize }, [prob.buffer])
   })
 }
@@ -1062,20 +1191,40 @@ function updateIntermediateExports () {
   if (q('nii-norm')) q('nii-norm').disabled = !(state.surf && state.surf.norm)
   if (q('xfm')) q('xfm').disabled = !(state.surf && state.surf.xfm)
   if (q('qc-csv')) q('qc-csv').disabled = !state.qc
-  if (q('nii-conf')) q('nii-conf').disabled = !state.segConf
+  if (q('nii-conf')) q('nii-conf').disabled = !state.conformed
+  if (q('nii-confmap')) q('nii-confmap').disabled = !state.segConf
+}
+
+// JSON do app (rótulos/colormaps): um 404 ou página de erro vira mensagem clara,
+// não "Unexpected token <" no meio da etapa
+async function fetchJson (url) {
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`não consegui carregar ${url} (HTTP ${r.status}) — verifique a conexão na primeira execução`)
+  return r.json()
+}
+
+// "volume encefálico" = BrainSegVol (FreeSurfer 7: sem tronco, com líquor); brainVol é
+// o total rotulado (inclui tronco e líquor) e só aparece quando o agregado não existe
+function brainVolTxt (stats) {
+  const bsv = (stats.composites || []).find(c => c.id === 'BrainSegVol')
+  return bsv && bsv.volMm3 > 0
+    ? `Volume encefálico (BrainSegVol): ${(bsv.volMm3 / 1000).toFixed(0)} cm³ · total rotulado ${(stats.brainVol / 1000).toFixed(0)} cm³`
+    : `Total rotulado: ${(stats.brainVol / 1000).toFixed(0)} cm³`
 }
 
 // recarrega rótulos/colormap, recalcula as estatísticas e re-renderiza
 async function applySegmentationResult (labelsPath, colormapPath) {
   await ensureViewerAlive()
-  state.labelsMap = labelsPath ? await (await fetch(labelsPath)).json() : null
-  state.colormap = colormapPath ? await (await fetch(colormapPath)).json() : null
+  state.labelsMap = labelsPath ? await fetchJson(labelsPath) : null
+  state.colormap = colormapPath ? await fetchJson(colormapPath) : null
   await refreshOverlay()
   if (state.labelsMap) {
     log('Calculando estatísticas por estrutura…')
     progress(0.95)
+    await yieldUI()
     state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
     renderResults()
+    await yieldUI()
     // QC automático por grupo tecidual (grupos do regressor do SynthSeg 2.0)
     try {
       state.qc = computeSegQC({
@@ -1104,7 +1253,7 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     $('step-export').hidden = false
     updateIntermediateExports()
     $('step-run').dataset.done = '1'
-    log(`Volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³.`, 'ok')
+    log(`${brainVolTxt(state.stats)}.`, 'ok')
   } else {
     log('Modelo sem tabela de rótulos (máscara) — estatísticas limitadas.', 'ok')
     $('step-export').hidden = false
@@ -1147,9 +1296,7 @@ async function runDktStep () {
     log('O passo DKT parcela um resultado SynthSeg ou aseg compacta pronto — rode a segmentação primeiro.', 'err')
     return
   }
-  state.running = true
-  $('run').disabled = true
-  $('run-dkt').disabled = true
+  setBusy(true)
   tlRemove('surf')
   tlStage('dkt', '04 · Parcelação DKT')
   try {
@@ -1178,6 +1325,7 @@ async function runDktStep () {
     }
     tlNote('dkt', `fonte: ${parcName} sobre ${src.pt} — ${isGPU ? 'GPU (WebGL)' : 'CPU'}`, 'decision')
     log(`Fundindo a parcelação (${parcName}) na fita cortical (esquema do predict_synthseg: seg==córtex recebe a parcela)…`)
+    await yieldUI()
     const fused = fuseDKT(state.seg, segDkt, dimsOf(state.conformed), src.fuse)
     const s = fused.stats
     // só troca o estado depois da fusão completa
@@ -1196,16 +1344,15 @@ async function runDktStep () {
         else if (s2 >= fu.rhBase && s2 < fu.rhBase + 34) rhP++
       }
       if (!lhP || !rhP) {
-        log(`Atenção: a fusão não deixou parcelas DKT no hemisfério ${!lhP && !rhP ? 'esquerdo NEM no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto. Re-rode o DKT com outra fonte (FastSurfer 3 vistas / axial+coronal / brainchop), em CPU ou memória baixa.`, 'err')
-        tlNote('dkt', `sem parcelas no hemisfério ${!lhP && !rhP ? 'esquerdo nem no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto; re-rode com outra fonte, CPU ou memória baixa`, 'warn')
+        log(`Atenção: a fusão não deixou parcelas DKT no hemisfério ${!lhP && !rhP ? 'esquerdo NEM no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto. Re-rode o DKT com outra fonte (FastSurfer 3 vistas / axial+coronal / brainchop) ou memória baixa na GPU (FastSurfer em CPU leva horas).`, 'err')
+        tlNote('dkt', `sem parcelas no hemisfério ${!lhP && !rhP ? 'esquerdo nem no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto; re-rode com outra fonte ou memória baixa na GPU`, 'warn')
       }
       var dktHemiOk = !!(lhP && rhP) // usado no fechamento da etapa abaixo
     }
     state.surf = null
-    await showSurfaces(false)
-    $('run-surf').disabled = false
-    $('show-surf').disabled = true
+    viewCache.delete('norm')
     $('show-surf').checked = false
+    await showSurfaces(false)
     $('surf-panel').hidden = true
     await applySegmentationResult(src.labels, src.colormap)
     tlNote('dkt', `fusão: ${s.cortexVox.toLocaleString('pt-BR')} voxels de córtex — ${s.direct.toLocaleString('pt-BR')} diretos, ${s.filled.toLocaleString('pt-BR')} por vizinhança, ${s.residual.toLocaleString('pt-BR')} residuais`)
@@ -1214,10 +1361,8 @@ async function runDktStep () {
     log(`Erro no passo DKT — o resultado ${src.pt} permanece intacto: ` + e.message, 'err')
     stepError('04 · Parcelação DKT', e)
     progress(0)
-    $('run-dkt').disabled = false
   } finally {
-    state.running = false
-    $('run').disabled = false
+    setBusy(false)
   }
 }
 
@@ -1258,9 +1403,7 @@ async function runSurfStep () {
       tlNote('surf', `córtex parcelado só no hemisfério ${lh ? 'esquerdo' : 'direito'} — prosseguindo só com esse lado`, 'warn')
     }
   }
-  state.running = true
-  $('run-surf').disabled = true
-  $('run').disabled = true
+  setBusy(true)
   viewCache.delete('norm')
   try {
     // motor recon-all-clinical: SDF da rede SynthDist quando os pesos convertidos
@@ -1268,7 +1411,9 @@ async function runSurfStep () {
     // senão SDF por EDT exata das máscaras (fallback declarado)
     let engine = $('surf-engine') ? $('surf-engine').value : 'edt'
     if (engine === 'net') {
-      const have = await fetch('./models/synthsurf/model.json', { method: 'HEAD' }).then(r2 => r2.ok).catch(() => false)
+      // GET (não HEAD): o service worker só serve GET do cache — offline, um HEAD
+      // falharia e cairia para EDT mesmo com a rede já baixada
+      const have = await fetch('./models/synthsurf/model.json').then(r2 => { const ok = r2.ok; try { r2.body && r2.body.cancel() } catch { /* nada */ } return ok }).catch(() => false)
       if (!have) {
         log('Rede SynthDist não instalada (models/synthsurf/ ausente) — usando SDF por EDT. Veja licenses/synthsurf.txt para instalar os pesos.', 'err')
         tlNote('surf', 'rede SynthDist ausente — caindo para SDF por EDT das máscaras', 'warn')
@@ -1278,26 +1423,31 @@ async function runSurfStep () {
     log(`Superfícies no fluxo recon-all-clinical: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → colocação pela energia da Eq. 5 → espessura Fischl–Dale…`)
     const r = await new Promise((resolve, reject) => {
       const w = new Worker('./workers/reconsurf.worker.js', { type: 'module' })
+      const release = trackWorker(w, reject)
       w.onmessage = (ev) => {
         const m = ev.data
         if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.1 + m.frac * 0.85) }
-        else if (m.cmd === 'done') { w.terminate(); resolve(m) }
-        else if (m.cmd === 'error') { w.terminate(); const err = new Error(m.message); err.diag = m.diag || null; reject(err) }
+        else if (m.cmd === 'done') { release(); resolve(m) }
+        else if (m.cmd === 'error') { release(); const err = new Error(m.message); err.diag = m.diag || null; reject(err) }
       }
-      w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'falha no worker de superfícies')) }
+      w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker de superfícies')) }
+      // cópias transferidas (não clonadas): sem duplicar ~84 MB nem travar a thread
+      // principal na clonagem; state.seg/conformed.img seguem intactos aqui
+      const segCopy = new Uint8Array(state.seg)
+      const imgCopy = engine === 'net' ? Float32Array.from(state.conformed.img) : null
       w.postMessage({
-        seg: new Uint8Array(state.seg),
+        seg: segCopy,
         dims: dimsOf(state.conformed),
         affine: affineOf(state.conformed).flat(),
         labels: state.labelsMap,
         colormap: state.colormap,
         voxVol: voxVolOf(state.conformed),
         engine,
-        img: engine === 'net' ? Float32Array.from(state.conformed.img) : null,
+        img: imgCopy,
         modelUrl: engine === 'net' ? new URL('./models/synthsurf/model.json', location.href).href : null,
         isGPU: $('backend').value !== 'cpu',
         tile: $('mem').value === 'low' ? 64 : 96
-      })
+      }, imgCopy ? [segCopy.buffer, imgCopy.buffer] : [segCopy.buffer])
     })
     if (r.aviso) { log('Aviso: ' + r.aviso, 'err'); tlNote('surf', r.aviso, 'warn') }
     for (const reg of r.stats) reg.pt = ptNameOf(reg.name)
@@ -1311,8 +1461,8 @@ async function runSurfStep () {
       norm: r.norm || null
     }
     renderSurfStats()
-    $('show-surf').disabled = false
     $('show-surf').checked = true
+    syncButtons()
     await ensureViewerAlive()
     await showSurfaces(true)
     updateIntermediateExports()
@@ -1335,9 +1485,7 @@ async function runSurfStep () {
     stepError('05 · Superfícies', e, e.diag || null)
     progress(0)
   } finally {
-    state.running = false
-    $('run').disabled = false
-    $('run-surf').disabled = false
+    setBusy(false)
   }
 }
 
@@ -1348,6 +1496,7 @@ async function runReconClinical () {
   if (state.running || !state.rawVol) return
   const btn = $('run-clinical')
   if (btn) btn.disabled = true
+  state.clinicalChain = true
   try {
     log('Pipeline recon-all-clinical (navegador): segmentação SynthSeg → parcelação DKT → superfícies por SDF.', 'ok')
     if ($('model').value !== 'synthseg') {
@@ -1361,7 +1510,8 @@ async function runReconClinical () {
     await runSurfStep()
     if (state.surf) log('Pipeline recon-all-clinical concluído: volumes, parcelação, superfícies com espessura, norm sintético e talairach.xfm prontos para exportação.', 'ok')
   } finally {
-    if (btn) btn.disabled = !state.rawVol
+    state.clinicalChain = false
+    syncButtons()
   }
 }
 
@@ -1418,29 +1568,32 @@ function renderSurfStats () {
   if (!state.surf) return
   const tb = $('surf-table')
   const fmt = (x, d = 2) => (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
-  tb.querySelector('thead').innerHTML = '<tr><th>Região</th><th>H</th><th>Esp (mm)</th><th>Área (cm²)</th><th>Vol (cm³)</th></tr>'
+  // GrayVol (prisma white→pial, como o aparc.stats) quando o worker o devolve;
+  // a contagem de voxels fica no title
+  const hasGray = state.surf.stats.some(r => r.grayVol_mm3 != null)
+  tb.querySelector('thead').innerHTML = '<tr><th>Região</th><th>H</th><th>Esp (mm)</th><th>Área (cm²)</th>' +
+    (hasGray ? '<th title="GrayVol: volume entre white e pial (aparc.stats)">GrayVol (cm³)</th>' : '<th>Vol (cm³)</th>') + '</tr>'
   tb.querySelector('tbody').innerHTML = state.surf.stats.map(r =>
     `<tr><td>${(r.pt || r.base).replace(/ — (esquerd|direit)[oa]$/, '')}</td><td>${r.hemi}</td>` +
-    `<td>${fmt(r.thickAvg)} ± ${fmt(r.thickStd)}</td><td>${fmt(r.area_mm2 / 100, 1)}</td><td>${fmt(r.volume_mm3 / 1000, 1)}</td></tr>`).join('')
+    `<td>${fmt(r.thickAvg)} ± ${fmt(r.thickStd)}</td><td>${fmt(r.area_mm2 / 100, 1)}</td>` +
+    (hasGray && r.grayVol_mm3 != null
+      ? `<td title="contagem de voxels: ${fmt(r.volume_mm3 / 1000, 1)} cm³">${fmt(r.grayVol_mm3 / 1000, 1)}</td>`
+      : `<td>${fmt(r.volume_mm3 / 1000, 1)}</td>`) + '</tr>').join('')
   $('surf-panel').hidden = false
 }
 
 async function runSegmentation () {
   if (state.running || !state.rawVol) return
-  state.running = true
-  $('run').disabled = true
+  setBusy(true)
   try {
-    const nv = state.nv
     const pipeline = effectivePipeline()
-    state.native = null
-    state.synthsr = null
-    state.bet = null
-    state.qc = null
-    state.segConf = null
-    $('qc-panel').hidden = true
+    // uma nova execução invalida TODO o resultado anterior (conformado, seg, stats,
+    // QC, superfícies): se ela falhar no meio, nada de exportar a segmentação antiga
+    // pareada com a conformação/proveniência nova
+    await clearSegmentationState({ withConformed: true })
+    try { while (state.nv.volumes.length > 1) await state.nv.removeVolume(state.nv.volumes[1]) } catch { /* só a sobreposição antiga */ }
     // linha do tempo: uma nova execução invalida as etapas 02–05 anteriores
     for (const id of ['prep', 'synthsr', 'conform', 'bet', 'seg', 'dkt', 'surf']) tlRemove(id)
-    viewCache.clear()
     // etapas nativas (≈ FSL), antes da conformação: reorientação → recorte → reamostragem
     // (só no robusto) → viés → suavização — a imagem corrigida alimenta todo o resto
     const flags = {
@@ -1495,11 +1648,21 @@ async function runSegmentation () {
     log('Conformando para 256³ · 1 mm (estilo FreeSurfer)…')
     tlStage('conform', 'Conformação 256³ · 1 mm')
     progress(0.4)
-    while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
-    await nv.addVolume(workVol)
-    const conformed = await nv.conform(workVol, false, true, false, true)
-    while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
-    await nv.addVolume(conformed)
+    // state.nv (não uma referência guardada): se o contexto WebGL cair durante a etapa,
+    // o visualizador é reconstruído e a instância antiga fica morta
+    await ensureViewerAlive()
+    while (state.nv.volumes.length) await state.nv.removeVolume(state.nv.volumes[0])
+    await state.nv.addVolume(workVol)
+    await yieldUI() // a conformação é síncrona (~2–5 s na thread principal): pinta o aviso antes
+    // escala do FreeSurfer/FastSurfer (getscale f_low=0, f_high=0.999 → uint8), não a
+    // janela robusta: com isRobustMinMax=true o NiiVue usa cal_min/cal_max do volume,
+    // i.e. a janela de EXIBIÇÃO (inclusive o arrasto manual de janelamento) mudaria a
+    // entrada das redes, e a 2–98% satura ~2% dos voxels e clareia a imagem ~1,4×
+    const conformed = await state.nv.conform(workVol, false, true, false, false)
+    await yieldUI()
+    await ensureViewerAlive()
+    while (state.nv.volumes.length) await state.nv.removeVolume(state.nv.volumes[0])
+    await state.nv.addVolume(conformed)
     state.conformed = conformed
     state.wl = null
     autoWindow()
@@ -1544,28 +1707,21 @@ async function runSegmentation () {
     state.seg = seg
     state.segKind = kind
     state.surf = null
-    await showSurfaces(false)
-    $('run-dkt').disabled = !DKT_SOURCES[kind]
-    $('run-surf').disabled = true
-    $('show-surf').disabled = true
-    $('show-surf').checked = false
-    $('surf-panel').hidden = true
     await applySegmentationResult(labelsPath, colormapPath)
     tlNote('seg', `${state.modelUsed} — ${isGPU ? 'GPU (WebGL)' : 'CPU'}`)
-    if (state.stats) tlNote('seg', `volume encefálico segmentado: ${(state.stats.brainVol / 1000).toFixed(0)} cm³`)
+    if (state.stats) tlNote('seg', brainVolTxt(state.stats))
     const segViews = [{ label: 'ver segmentação', view: 'seg' }]
     if (state.segConf) segViews.push({ label: 'mapa de confiança', view: 'confmap' })
     tlDone('seg', segViews, state.qc && state.qc.resumo.gruposEmAlerta.length ? 'warn' : 'ok')
   } catch (e) {
     log('Erro: ' + e.message, 'err')
     if (/memory|memória|texture|alloc/i.test(String(e.message))) {
-      log('Sugestão: troque "Memória" para Baixa, ou a execução para CPU.', 'err')
+      log('Sugestão: troque "Memória" para Baixa e feche outras abas; CPU só como último recurso (bem mais lento).', 'err')
     }
     stepError('03 · Segmentação', e)
     progress(0)
   } finally {
-    state.running = false
-    $('run').disabled = false
+    setBusy(false)
   }
 }
 
@@ -1593,7 +1749,7 @@ function renderResults () {
   for (const c of s.composites) {
     const div = document.createElement('div')
     div.className = 'card'
-    div.innerHTML = `<div class="k">${c.ptName}</div><div class="v">${fmtVol(c.volMm3)} <small>${c.pctBrain.toFixed(1)}%</small></div>`
+    div.innerHTML = `<div class="k">${c.ptName}</div><div class="v">${fmtVol(c.volMm3)} <small title="% do total rotulado">${c.pctBrain.toFixed(1)}%</small></div>`
     cards.appendChild(div)
   }
 
@@ -1618,7 +1774,7 @@ function renderTable () {
   const gsel = $('group-filter').value
   const thead = $('table').querySelector('thead')
   const tbody = $('table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right">% encéfalo</th><th style="text-align:right">Intensidade média</th></tr>'
+  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th></tr>'
   tbody.innerHTML = ''
   let lastGroup = null
   for (const r of s.rows) {
@@ -1772,8 +1928,12 @@ function saveBlob (data, name, type = 'application/octet-stream') {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name
+  a.hidden = true
+  document.body.appendChild(a) // Firefox/Safari antigos ignoram click() em âncora solta
   a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+  a.remove()
+  // 4 s era pouco para o Safari/Firefox começarem a gravar pacotes de centenas de MB
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000)
 }
 
 async function snapshotJpeg () {
@@ -1805,6 +1965,7 @@ async function makeExports () {
       return await gzipBuffer(buf)
     },
     niiConf: async () => {
+      if (!state.conformed) return null
       const img0 = state.conformed.img
       const img = (img0 instanceof Uint8Array || img0 instanceof Int16Array || img0 instanceof Float32Array) ? img0 : Float32Array.from(img0)
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: datatypeOf(img), description: 'segmentarm imagem de análise' }, img)
@@ -1819,7 +1980,9 @@ async function makeExports () {
     },
     xfm: () => state.surf && state.surf.xfm ? state.surf.xfm : null,
     qcCsv: () => state.qc ? qcToCSV(state.qc, meta, dec) : null,
-    niiConf: async () => {
+    // mapa de confiança: chave própria — antes repetia "niiConf" e sobrescrevia o
+    // exportador do volume conformado (o botão "Conformado" baixava a confiança)
+    niiConfMap: async () => {
       if (!state.segConf) return null
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm confianca da rede 0-255' }, state.segConf)
       return await gzipBuffer(buf)
@@ -1838,7 +2001,7 @@ async function makeExports () {
 }
 
 async function handleExport (kind) {
-  if (!state.stats && !['nii-conf', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'nii-norm', 'xfm', 'qc-csv', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
+  if (!state.stats && !['nii-conf', 'nii-confmap', 'nii-native', 'nii-synthsr', 'nii-mask', 'nii-brain', 'nii-norm', 'xfm', 'qc-csv', 'errlog'].includes(kind) && !kind.startsWith('cohort')) {
     log('Nada para exportar ainda — rode a segmentação primeiro.', 'err')
     return
   }
@@ -1851,7 +2014,12 @@ async function handleExport (kind) {
       case 'sav': saveBlob(ex.sav(), `${sub}_volumes.sav`); break
       case 'pdf': saveBlob(await ex.pdf(), `${sub}_relatorio.pdf`, 'application/pdf'); break
       case 'nii-seg': saveBlob(await ex.niiSeg(), `${sub}_segmentacao.nii.gz`); break
-      case 'nii-conf': saveBlob(await ex.niiConf(), `${sub}_conformado.nii.gz`); break
+      case 'nii-conf': {
+        const b = await ex.niiConf()
+        if (b) saveBlob(b, `${sub}_conformado.nii.gz`)
+        else log('Sem volume conformado — rode a segmentação (passo 03).', 'err')
+        break
+      }
       case 'nii-native': {
         const b = await ex.niiNative()
         if (b) saveBlob(b, `${sub}_preproc_nativo.nii.gz`)
@@ -1888,8 +2056,8 @@ async function handleExport (kind) {
         else log('Sem QC — rode a segmentação primeiro.', 'err')
         break
       }
-      case 'nii-conf': {
-        const b = await ex.niiConf()
+      case 'nii-confmap': {
+        const b = await ex.niiConfMap()
         if (b) saveBlob(b, `${sub}_confianca.nii.gz`)
         else log('Sem mapa de confiança — a rede usada não devolve posteriores (só o SynthSeg).', 'err')
         break
@@ -1916,7 +2084,7 @@ async function handleExport (kind) {
           if (state.surf.norm) files.push({ name: `${sub}_norm_sintetico.nii.gz`, data: new Uint8Array(await ex.niiNorm()) })
         }
         if (state.qc) files.push({ name: `${sub}_qc.csv`, data: ex.qcCsv() })
-        if (state.segConf) files.push({ name: `${sub}_confianca.nii.gz`, data: new Uint8Array(await ex.niiConf()) })
+        if (state.segConf) files.push({ name: `${sub}_confianca.nii.gz`, data: new Uint8Array(await ex.niiConfMap()) })
         if (state.native) files.push({ name: `${sub}_preproc_nativo.nii.gz`, data: new Uint8Array(await ex.niiNative()) })
         if (state.synthsr) files.push({ name: `${sub}_synthsr_mprage.nii.gz`, data: new Uint8Array(await ex.niiSynthsr()) })
         if (state.bet) {
@@ -1956,10 +2124,12 @@ function cohortCSV () {
   const keys = []
   const seen = new Set()
   for (const e of state.cohort) for (const k of Object.keys(e.row)) if (!seen.has(k)) { seen.add(k); keys.push(k) }
-  const fmt = (v) => typeof v === 'number' ? (dec === ',' ? v.toFixed(2).replace('.', ',') : v.toFixed(2)) : (v == null ? '' : /[";\n,]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : v)
-  const lines = [keys.join(sep)]
+  const q = (v) => { const t = String(v); return /[";\r\n,]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t }
+  const fmt = (v) => typeof v === 'number' ? (Number.isFinite(v) ? (dec === ',' ? v.toFixed(2).replace('.', ',') : v.toFixed(2)) : '') : (v == null ? '' : q(v))
+  const lines = [keys.map(q).join(sep)]
   for (const e of state.cohort) lines.push(keys.map(k => fmt(e.row[k])).join(sep))
-  return lines.join('\r\n')
+  // BOM: sem ele o Excel pt-BR lê UTF-8 como Latin-1 e estraga os acentos
+  return '\uFEFF' + lines.join('\r\n') + '\r\n'
 }
 
 function persistCohort () {
@@ -1980,21 +2150,39 @@ function wireInputs () {
   drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') $('file-nifti').click() }
   $('pick-file').onclick = () => $('file-nifti').click()
   $('pick-folder').onclick = () => $('file-dicom').click()
+  // NIfTI avulso: o seletor de séries DICOM anterior não vale mais
+  const hideSeries = () => { $('series-field').hidden = true; $('series').onchange = null }
   $('file-nifti').onchange = async (e) => {
-    if (!e.target.files.length) return
-    const f = e.target.files[0]
-    try { await loadVolumeFile(f, null, `NIfTI ${f.name}`) } catch (err) { log('Erro ao carregar: ' + err.message, 'err') }
+    const input = e.target
+    if (!input.files.length) return
+    const f = input.files[0]
+    input.value = '' // permite reabrir o MESMO arquivo (sem isso o change não dispara)
+    if (refuseWhileBusy()) return
+    try { hideSeries(); await loadVolumeFile(f, null, `NIfTI ${f.name}`) } catch (err) { log('Erro ao carregar: ' + err.message, 'err'); progress(0) }
   }
   $('file-dicom').onchange = async (e) => {
-    if (!e.target.files.length) return
+    const input = e.target
+    if (!input.files.length) return
+    const files = Array.from(input.files)
+    input.value = ''
     try {
-      await handleDicomInput(Array.from(e.target.files))
+      await handleDicomInput(files)
     } catch (err) { log('Erro na conversão DICOM: ' + err.message, 'err'); progress(0) }
   }
   ;['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over') }))
   ;['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over') }))
-  drop.addEventListener('drop', async (e) => {
+  // depois do primeiro exame a zona de soltura some: soltar um arquivo em qualquer
+  // lugar da página fazia o navegador abri-lo/baixá-lo (perdendo a sessão) —
+  // a janela inteira passa a aceitar a soltura
+  window.addEventListener('dragover', (e) => { e.preventDefault() })
+  window.addEventListener('drop', (e) => {
     e.preventDefault()
+    if (!drop.contains(e.target)) handleDrop(e) // a zona tem o próprio ouvinte
+  })
+  drop.addEventListener('drop', handleDrop)
+  async function handleDrop (e) {
+    e.preventDefault()
+    if (refuseWhileBusy()) return
     try {
       const items = [...e.dataTransfer.items]
       const files = []
@@ -2012,25 +2200,31 @@ function wireInputs () {
           } while (batch.length)
         }
       }
-      for (const it of items) {
-        const entry = it.webkitGetAsEntry && it.webkitGetAsEntry()
-        if (entry) await walk(entry, '')
-      }
+      // as entradas têm de ser obtidas TODAS antes do primeiro await: depois do
+      // despacho do evento os DataTransferItem ficam inválidos (só o 1º item vingava)
+      const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean)
+      const loose = entries.length ? [] : [...(e.dataTransfer.files || [])]
+      for (const entry of entries) await walk(entry, '')
+      files.push(...loose)
       if (!files.length) return
       const niiFile = files.find(f => /\.nii(\.gz)?$/i.test(f.name))
       if (files.length === 1 && niiFile) {
+        hideSeries()
         await loadVolumeFile(niiFile, null, `NIfTI ${niiFile.name}`)
       } else {
         await handleDicomInput(files)
       }
     } catch (err) { log('Erro na entrada: ' + err.message, 'err'); progress(0) }
-  })
+  }
 
   $('load-example').onclick = async () => {
+    if (refuseWhileBusy()) return
     try {
       log('Baixando o exame de exemplo (T1 real, 3 MB)…')
       const resp = await fetch('./example/t1_exemplo.nii.gz')
+      if (!resp.ok) throw new Error(`exemplo indisponível (HTTP ${resp.status})`)
       const blob = await resp.blob()
+      hideSeries()
       const f = new File([blob], 't1_exemplo.nii.gz')
       if (!$('subject').value) $('subject').value = 'EXEMPLO-T1'
       await loadVolumeFile(f, { SeriesDescription: 'T1 MPRAGE exemplo (brain2print)' }, 'Exemplo T1 volumétrico')
@@ -2038,6 +2232,10 @@ function wireInputs () {
   }
 
   $('run').onclick = runSegmentation
+  $('cancel').onclick = () => {
+    if (cancelJobs()) log('Cancelando a etapa em execução — o worker foi encerrado e a memória dele liberada.', 'err')
+    else if (state.running) log('Cancelamento pedido — a etapa para ao iniciar a próxima rede (o trecho atual roda na thread principal).', 'err')
+  }
   $('run-clinical').onclick = runReconClinical
   $('run-dkt').onclick = runDktStep
   $('run-surf').onclick = runSurfStep
@@ -2081,6 +2279,7 @@ async function main () {
   armContextGuard()
   initWindowing()
   wireInputs()
+  syncButtons()
   try {
     state.cohort = JSON.parse(localStorage.getItem('segmentarm_cohort_v1') || '[]')
   } catch { state.cohort = [] }
