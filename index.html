@@ -151,6 +151,14 @@
       </div>
       <button class="btn" id="run-surf" disabled>Reconstruir superfícies</button>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="show-surf" disabled> Mostrar 3D no visualizador</label>
+      <div class="field" style="margin-top:6px">
+        <label for="surf-show-kind">Superfície exibida</label>
+        <select id="surf-show-kind">
+          <option value="pial" selected>Pial (borda externa do córtex)</option>
+          <option value="white">Branca (limite substância branca/córtex)</option>
+          <option value="both">Ambas (pial translúcida)</option>
+        </select>
+      </div>
       <p class="note">Fluxo do <code>recon-all-clinical</code>: máscaras <code>wm.seg</code>/<code>filled</code>
       pelas regras do <code>mri_synth_surf</code> → SDFs white/pial (rede SynthDist se instalada —
       veja <code>licenses/synthsurf.txt</code> — ou EDT das máscaras) → colocação pela energia do

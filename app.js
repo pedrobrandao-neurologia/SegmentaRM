@@ -1511,9 +1511,19 @@ async function runSurfStep () {
       motor: r.engineUsed === 'net' ? 'rede SynthDist' : 'SDF por EDT das máscaras',
       xfm: r.xfm || null,
       talairachRotulos: r.talairach ? r.talairach.nUsed : 0,
-      norm: r.norm || null
+      norm: r.norm || null,
+      qcMalha: r.qcMalha || null,
+      malhaConfiavel: r.malhaConfiavel !== false
     }
-    renderSurfStats()
+    // a malha serve à VISUALIZAÇÃO; as medidas (espessura) vêm do método volumétrico
+    if (r.qcMalha) {
+      for (const [h, q] of Object.entries(r.qcMalha)) {
+        if (!q) continue
+        const txt = `malha ${h === 'lh' ? 'esquerda' : 'direita'}: dobras ${q.dobrasPialPct.toFixed(1)}% · faces invertidas ${q.invertidasPct.toFixed(1)}% · aresta p99 ${q.arestaP99Pial_mm.toFixed(1)} mm · χ ${q.euler}` + (q.confiavel ? ' — boa para visualização' : ' — ABAIXO do limite de qualidade')
+        log('· QC ' + txt, q.confiavel ? '' : 'err')
+        tlNote('surf', 'QC da ' + txt, q.confiavel ? 'info' : 'warn')
+      }
+    }
     $('show-surf').checked = true
     syncButtons()
     await ensureViewerAlive()
@@ -1575,10 +1585,13 @@ async function showSurfaces (on) {
   try {
     while (nv.meshes && nv.meshes.length) nv.removeMesh(nv.meshes[0])
     if (on && state.surf) {
+      const kindSel = $('surf-show-kind') ? $('surf-show-kind').value : 'pial'
       for (const m of state.surf.meshes) {
-        if (m.kind !== 'pial') continue
+        if (kindSel !== 'both' && m.kind !== kindSel) continue
         const file = new File([m.mz3], m.name + '.mz3')
         const mesh = await NVMesh.loadFromFile({ file, gl: nv.gl, name: m.name + '.mz3' })
+        // com as duas, a pial fica translúcida para deixar ver a branca por dentro
+        if (kindSel === 'both' && m.kind === 'pial') mesh.opacity = 0.35
         nv.addMesh(mesh)
       }
       // o render volumétrico oclui as malhas: esconde os volumes enquanto o 3D está ativo
@@ -2310,6 +2323,7 @@ function wireInputs () {
   $('run-dkt').onclick = runDktStep
   $('run-surf').onclick = runSurfStep
   $('show-surf').onchange = () => showSurfaces($('show-surf').checked)
+  if ($('surf-show-kind')) $('surf-show-kind').onchange = () => { if ($('show-surf').checked) showSurfaces(true) }
   $('bet-f').oninput = () => { $('bet-f-out').textContent = (+$('bet-f').value).toFixed(2) }
   $('opacity').oninput = () => {
     const nv = state.nv
