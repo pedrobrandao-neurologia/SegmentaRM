@@ -1736,7 +1736,13 @@ async function runSegmentation () {
     if (MODEL_MAP[kind].synth) {
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg, workVol)
+      // entrada nativa = o arquivo ORIGINAL (como o predict.py): a reorientação RAS é
+      // uma permutação sem perda, mas a reamostragem oficial a 1 mm posiciona as
+      // amostras a partir do voxel 0 de cada eixo — numa imagem espelhada a grade
+      // cairia deslocada da oficial. Recorte de pescoço, suavização ou SynthSR mudam o
+      // conteúdo, e aí a rede recebe a imagem transformada (escolha do usuário).
+      const nativeForSeg = (flags.doCrop || flags.doSmooth || state.synthsr) ? workVol : state.rawVol
+      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg, nativeForSeg)
       labelsPath = './models/synthseg1/labels.json'
       colormapPath = './models/synthseg1/colormap.json'
     } else {
