@@ -1092,7 +1092,9 @@ function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = nul
     affine: affineOf(conformed),
     isGPU,
     tile,
-    overlap: 32,
+    // sobreposição 64: contra o SynthSeg oficial (volume inteiro), Dice médio 0,991 → 0,998
+    // no T1 de teste, em geral com o mesmo número de blocos de 128³
+    overlap: 64,
     flip,
     native
   }, pFrom, pTo)
