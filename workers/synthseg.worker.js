@@ -15,7 +15,7 @@
 
 import * as tf from '../vendor/tf.fesm.min.js'
 import { registerUpSampling3D } from '../lib/tfjs-upsampling3d.js'
-import { runSynthSeg, SYNTHSEG1_TOPOLOGY } from '../lib/synthseg-core.js'
+import { runSynthSeg, SYNTHSEG1_TOPOLOGY, setContextLostCheck } from '../lib/synthseg-core.js'
 
 function ui (message, progressFrac = -1, modalMessage = '') {
   self.postMessage({ cmd: 'ui', message, progressFrac, modalMessage })
@@ -40,6 +40,14 @@ self.onmessage = async (ev) => {
     }
     tf.enableProdMode()
     await tf.ready()
+    // contexto WebGL perdido (GPU sem memória, driver reiniciado): o tfjs espera a GPU
+    // para sempre — o núcleo passa a desistir com erro claro, e o app liga um cão de
+    // guarda para esta execução
+    if (tf.getBackend() === 'webgl') {
+      const gl = tf.backend().gpgpu && tf.backend().gpgpu.gl
+      if (gl && gl.isContextLost) setContextLostCheck(() => gl.isContextLost())
+    }
+    self.postMessage({ cmd: 'backend', name: tf.getBackend() })
     ui(`SynthSeg: backend ${tf.getBackend()}${gpuFail ? ' (WebGL indisponível neste navegador/worker — caindo para CPU, bem mais lento)' : ''}, baixando/carregando a rede…`, 0.02)
     const model = await tf.loadLayersModel(modelUrl)
     const nOut = model.outputs[0].shape[4]
@@ -56,7 +64,7 @@ self.onmessage = async (ev) => {
     self.postMessage({ cmd: 'img', img: seg, conf, volumes, volumesUnit }, [seg.buffer, conf.buffer, volumes.buffer])
   } catch (e) {
     const msg = String((e && e.message) || e)
-    const oom = /memory|alloc|texture|context lost|OOM/i.test(msg)
+    const oom = /memory|memória|alloc|texture|context lost|contexto WebGL|OOM/i.test(msg)
     ui('', -1, 'SynthSeg: ' + msg + (oom ? ' — memória insuficiente: tente a variante "memória baixa" (blocos menores) ou o backend CPU.' : ''))
   }
 }

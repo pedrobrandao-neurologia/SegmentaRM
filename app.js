@@ -1042,10 +1042,27 @@ function runWorker (url, message, pFrom, pTo) {
     const w = new Worker(url, { type: 'module' })
     state.worker = w
     const release = trackWorker(w, reject)
-    const end = () => { release(); state.worker = null }
+    let end = () => { release(); state.worker = null }
     const t0 = performance.now()
+    // cão de guarda: com WebGL, um worker mudo por muito tempo quase sempre é GPU
+    // travada ou contexto perdido (o tfjs espera a GPU para sempre, sem erro). Com CPU
+    // uma única camada pode levar minutos, então não há limite.
+    let watchdog = null
+    let silentMs = 0
+    const arm = () => {
+      if (!silentMs) return
+      clearTimeout(watchdog)
+      watchdog = setTimeout(() => {
+        end()
+        reject(new Error(`a GPU parou de responder (${Math.round(silentMs / 60000)} min sem progresso) — provável falta de memória de vídeo ou contexto WebGL perdido. Tente "Memória: Baixa" (blocos menores), feche outras abas que usam a GPU ou, em último caso, CPU.`))
+      }, silentMs)
+    }
+    const end0 = end
+    end = () => { clearTimeout(watchdog); end0() }
     w.onmessage = (ev) => {
       const d = ev.data
+      if (d.cmd === 'backend') { silentMs = d.name === 'webgl' ? 8 * 60000 : 0; arm(); return }
+      arm()
       if (d.cmd === 'ui') {
         if (d.message) log('· ' + d.message)
         if (typeof d.progressFrac === 'number' && d.progressFrac >= 0) progress(pFrom + d.progressFrac * (pTo - pFrom))
