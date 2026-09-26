@@ -13,7 +13,8 @@ function ui (message, progressFrac = -1, modalMessage = '') {
 }
 
 self.onmessage = async (ev) => {
-  const { modelUrl, dims, affine, isGPU = true, tile = 96, flip = false } = ev.data
+  const { modelUrl, dims, affine, isGPU = true, flip = false } = ev.data
+  let tile = ev.data.tile || 96
   let img = ev.data.img
   ev.data.img = null // o nativo só serve à reamostragem: solta a referência depois dela
   let model = null
@@ -27,6 +28,11 @@ self.onmessage = async (ev) => {
     }
     await tf.enableProdMode()
     await tf.ready()
+    // bloco que cabe na textura da GPU (maior ativação ≈ 72 canais em resolução cheia)
+    if (tf.getBackend() === 'webgl') {
+      const maxTex = tf.env().getNumber('WEBGL_MAX_TEXTURE_SIZE') || 4096
+      while (tile > 32 && tile ** 3 * 72 > maxTex * maxTex) tile -= 32
+    }
     ui(`SynthSR: backend ${tf.getBackend()}, baixando/carregando a rede (26 MB)…`, 0.01)
     model = await tf.loadLayersModel(modelUrl)
     ui('SynthSR: reamostrando para a grade RAS 1 mm…', 0.04)

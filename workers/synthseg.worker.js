@@ -48,6 +48,16 @@ self.onmessage = async (ev) => {
       if (gl && gl.isContextLost) setContextLostCheck(() => gl.isContextLost())
     }
     self.postMessage({ cmd: 'backend', name: tf.getBackend() })
+    // bloco que cabe na GPU: a maior ativação da UNet é a concatenação de 72 canais em
+    // resolução cheia (T³·72 valores numa textura de até maxTex²). Com blocos de 128
+    // isso pede ~12 300² — acima do limite de 8192² de muitas GPUs integradas, onde a
+    // inferência falhava ("Requested texture size … greater than WebGL maximum")
+    let tileUse = tile
+    if (tf.getBackend() === 'webgl') {
+      const maxTex = tf.env().getNumber('WEBGL_MAX_TEXTURE_SIZE') || 4096
+      while (tileUse > 32 && tileUse ** 3 * 72 > maxTex * maxTex) tileUse -= 32
+      if (tileUse !== tile) ui(`SynthSeg: a GPU aceita texturas de até ${maxTex}² — blocos reduzidos de ${tile}³ para ${tileUse}³.`, 0.03)
+    }
     ui(`SynthSeg: backend ${tf.getBackend()}${gpuFail ? ' (WebGL indisponível neste navegador/worker — caindo para CPU, bem mais lento)' : ''}, baixando/carregando a rede…`, 0.02)
     const model = await tf.loadLayersModel(modelUrl)
     const nOut = model.outputs[0].shape[4]
@@ -56,7 +66,7 @@ self.onmessage = async (ev) => {
 
     const t0 = performance.now()
     const { seg, conf, volumes, volumesUnit } = await runSynthSeg({
-      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native, cropShape: crop,
+      tf, model, img, dims, affine, tile: tileUse, overlap, flip, sigma, postprocess, native, cropShape: crop,
       onProgress: (msg, frac) => ui('SynthSeg: ' + msg + '.', frac)
     })
     model.dispose()
