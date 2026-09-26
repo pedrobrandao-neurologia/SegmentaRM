@@ -116,7 +116,8 @@ async function netSdfs (img, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, is
   const { registerUpSampling3D } = await import('../lib/tfjs-upsampling3d.js')
   registerUpSampling3D(tf)
   if (isGPU && typeof OffscreenCanvas !== 'undefined') {
-    try { await tf.setBackend('webgl') } catch { await tf.setBackend('cpu') }
+    // setBackend devolve false (não lança) quando a WebGL não inicializa
+    if (!(await tf.setBackend('webgl').catch(() => false))) await tf.setBackend('cpu')
   } else await tf.setBackend('cpu')
   await tf.enableProdMode()
   await tf.ready()

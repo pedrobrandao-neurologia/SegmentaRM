@@ -1248,11 +1248,8 @@ async function enableProductionMode(textureF16Flag = true, isNvidia = true, useG
   // backend escolhido pela UI (opts.isGPU); WebGL num worker exige OffscreenCanvas,
   // então qualquer falha derruba para o backend de CPU
   if (useGPU && typeof OffscreenCanvas !== 'undefined') {
-    try {
-      await tf.setBackend('webgl')
-    } catch {
-      await tf.setBackend('cpu')
-    }
+    // setBackend devolve false (não lança) quando a WebGL não inicializa
+    if (!(await tf.setBackend('webgl').catch(() => false))) await tf.setBackend('cpu')
   } else {
     await tf.setBackend('cpu')
   }
@@ -1297,8 +1294,10 @@ async function runInferenceWW(opts, modelEntry, niftiHeader, niftiImage) {
   tf.engine().startScope()
   console.log('Batch size: ', batchSize)
   console.log('Num of Channels: ', numOfChan)
+  // backend ANTES de carregar o modelo: os pesos nascem no backend escolhido (com
+  // CPU selecionada, o tfjs não tenta mais inicializar a WebGL à toa)
+  await enableProductionMode(true, modelEntry.isNvidia === true, opts.isGPU !== false)
   const model = await load_model(opts.rootURL + modelEntry.path)
-  await enableProductionMode(true, (model && modelEntry.isNvidia === true), opts.isGPU !== false)
   statData.TF_Backend = tf.getBackend()
   const modelObject = model
   let batchInputShape = []

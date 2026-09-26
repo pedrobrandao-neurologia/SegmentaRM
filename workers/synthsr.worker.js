@@ -20,7 +20,8 @@ self.onmessage = async (ev) => {
   try {
     registerUpSampling3D(tf)
     if (isGPU && typeof OffscreenCanvas !== 'undefined') {
-      try { await tf.setBackend('webgl') } catch { await tf.setBackend('cpu') }
+      // setBackend devolve false (não lança) quando a WebGL não inicializa
+      if (!(await tf.setBackend('webgl').catch(() => false))) await tf.setBackend('cpu')
     } else {
       await tf.setBackend('cpu')
     }
