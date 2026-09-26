@@ -23,6 +23,10 @@ const VERSION = '1.0.0'
 // NADA do passo 05 entra nas exportações (CSV/JSON/SAV/PDF/ZIP/coorte, MZ3, norm,
 // talairach.xfm). Reative aqui quando o passo estiver validado.
 const SURF_EXPORT = false
+// Espessura cortical volumétrica (passo 05): validada em fantomas, ainda sem comparação
+// com o FreeSurfer nos mesmos exames — aparece na tela, mas só entra nas exportações
+// quando esta chave for ligada.
+const THICK_EXPORT = false
 const $ = (id) => document.getElementById(id)
 
 // seleção de modelo → índice em inferenceModelsList (ids 1-based)
@@ -853,6 +857,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.norms = null
   state.qc = null
   state.surf = null
+  state.thick = null
   state.modelUsed = ''
   viewCache.clear()
   $('show-surf').checked = false
@@ -1458,6 +1463,22 @@ async function runSurfStep () {
   }
   setBusy(true)
   viewCache.delete('norm')
+  // 1) espessura volumétrica (as medidas): roda primeiro e sobrevive a uma falha da malha
+  try {
+    log('Espessura cortical volumétrica: Laplace entre as bordas do córtex (Yezzi & Prince 2003), sulcos fechados reconstruídos pela linha média (CAT12/PBT)…')
+    const t0 = performance.now()
+    state.thick = await runThicknessWorker()
+    renderThick()
+    const h = state.thick.hemisferios || {}
+    const f = (x) => x == null ? '—' : x.toFixed(2)
+    log(`Espessura volumétrica pronta em ${((performance.now() - t0) / 1000).toFixed(0)} s: média E ${f(h.lh && h.lh.espessura_media_mm)} · D ${f(h.rh && h.rh.espessura_media_mm)} mm (${state.thick.regioes.length} regiões).`, 'ok')
+    tlNote('surf', `espessura volumétrica (Laplace + reconstrução sulcal): média E ${f(h.lh && h.lh.espessura_media_mm)} · D ${f(h.rh && h.rh.espessura_media_mm)} mm`, 'info')
+  } catch (e) {
+    state.thick = null
+    log('Espessura volumétrica não calculada: ' + e.message, 'err')
+    tlNote('surf', 'espessura volumétrica falhou: ' + e.message, 'warn')
+  }
+  // 2) malhas white/pial — só para visualização
   try {
     // motor recon-all-clinical: SDF da rede SynthDist quando os pesos convertidos
     // estiverem em models/synthsurf/ (traga-seus-pesos; licença do FreeSurfer),
@@ -1473,7 +1494,7 @@ async function runSurfStep () {
         engine = 'edt'
       }
     }
-    log(`Superfícies no fluxo recon-all-clinical: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → colocação pela energia da Eq. 5 → espessura Fischl–Dale…`)
+    log(`Malhas para visualização: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → white pela energia da Eq. 5 → pial por raio a partir da white…`)
     const r = await new Promise((resolve, reject) => {
       const w = new Worker('./workers/reconsurf.worker.js', { type: 'module' })
       const release = trackWorker(w, reject)
@@ -1544,12 +1565,56 @@ async function runSurfStep () {
     ], (r.aviso || (r.euler && !eulOk)) ? 'warn' : 'ok')
     progress(0)
   } catch (e) {
-    log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
+    log('Erro nas malhas — o resultado DKT' + (state.thick ? ' e a espessura volumétrica permanecem' : ' permanece') + ' intacto: ' + e.message, 'err')
     stepError('05 · Superfícies', e, e.diag || null)
     progress(0)
   } finally {
     setBusy(false)
   }
+}
+
+// espessura cortical volumétrica em worker próprio (lib/thickness.js)
+function runThicknessWorker () {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/thickness.worker.js', { type: 'module' })
+    const release = trackWorker(w, reject)
+    w.onmessage = (ev) => {
+      const m = ev.data
+      if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.05 + (m.frac || 0) * 0.3) }
+      else if (m.cmd === 'done') { release(); resolve(m) }
+      else if (m.cmd === 'error') { release(); reject(new Error(m.message)) }
+    }
+    w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker de espessura')) }
+    const segCopy = new Uint8Array(state.seg)
+    w.postMessage({
+      seg: segCopy,
+      dims: dimsOf(state.conformed),
+      affine: affineOf(state.conformed).flat(),
+      labels: state.labelsMap,
+      voxVol: voxVolOf(state.conformed)
+    }, [segCopy.buffer])
+  })
+}
+
+function renderThick () {
+  const t = state.thick
+  if (!t) return
+  const tb = $('surf-table')
+  const fmt = (x, d = 2) => x == null || !isFinite(x) ? '—' : (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  tb.querySelector('thead').innerHTML = '<tr><th>Região</th><th>H</th><th title="média ponderada por área na superfície média ± DP">Espessura (mm)</th><th>Mediana</th><th title="área da superfície média (u = 0,5)">Área (cm²)</th></tr>'
+  const rows = t.regioes.slice().sort((a, b) => String(a.parcela).localeCompare(String(b.parcela)) || String(a.hemi).localeCompare(String(b.hemi)))
+  tb.querySelector('tbody').innerHTML = rows.map(r =>
+    `<tr><td>${ptNameOf(r.name).replace(/ — (esquerd|direit)[oa]$/, '')}</td><td>${r.hemi === 'lh' || r.hemi === 'E' ? 'E' : 'D'}</td>` +
+    `<td>${fmt(r.espessura_media_mm)} ± ${fmt(r.espessura_dp_mm)}</td><td>${fmt(r.espessura_mediana_mm)}</td>` +
+    `<td>${fmt(r.area_superficie_media_mm2 / 100, 1)}</td></tr>`).join('')
+  const h = t.hemisferios || {}
+  const hs = (k, nm) => h[k] ? `${nm} ${fmt(h[k].espessura_media_mm)} mm (mediana ${fmt(h[k].espessura_mediana_mm)})` : null
+  const qh = (t.qc && t.qc.hemisferios) || {}
+  const trunc = Object.values(qh).map(q => q.frac_truncados_5mm).filter(x => x != null)
+  $('thick-summary').textContent = [hs('lh', 'Esquerdo'), hs('rh', 'Direito')].filter(Boolean).join(' · ') +
+    (trunc.length ? ` · ${fmt(100 * Math.max(...trunc), 1)}% no teto de 5 mm` : '') +
+    (t.regioes.length ? '' : ' · sem parcelas DKT: só as médias por hemisfério')
+  $('surf-panel').hidden = false
 }
 
 // ---------- pipeline completo recon-all-clinical (03 → 04 → 05) ----------
@@ -1980,6 +2045,14 @@ function metaNow () {
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
     qc: state.qc ? { resumo: state.qc.resumo, grupos: state.qc.grupos } : null,
+    espessura: THICK_EXPORT && state.thick
+      ? {
+          metodo: state.thick.metodo,
+          hemisferios: state.thick.hemisferios,
+          regioes: state.thick.regioes.map(r => ({ ...r, pt: ptNameOf(r.name) })),
+          qc: state.thick.qc
+        }
+      : null,
     surf: SURF_EXPORT && state.surf
       ? {
           regioes: state.surf.stats,

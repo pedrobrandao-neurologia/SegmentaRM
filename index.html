@@ -266,12 +266,16 @@
       </section>
 
       <section class="panel" id="surf-panel" hidden>
-        <h3>Superfície cortical — espessura e área <span class="badge-exp">em revisão · não exportado</span></h3>
-        <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Fluxo recon-all-clinical: superfícies colocadas nas SDFs white/pial
-        (energia do artigo, λ₁/λ₂ de Dale 1999), espessura por pareamento branca↔pial
-        (Fischl &amp; Dale 2000, teto 5 mm), área regional medida na white (como o
-        <code>aparc.stats</code>); χ de Euler relatado como QC de topologia.</p>
+        <h3>Espessura cortical — por região DKT <span class="badge-exp">em revisão · não exportado</span></h3>
+        <p class="note" id="thick-summary" style="margin:0 0 8px"></p>
+        <div class="tablewrap" style="max-height:300px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
+        <p class="note">Espessura <b>volumétrica</b> (sem malha): equação de Laplace entre a borda da
+        substância branca e a borda externa do córtex e comprimentos das linhas de corrente
+        (Jones 2000; Yezzi &amp; Prince 2003), com os sulcos fechados reconstruídos pela linha média,
+        como no CAT12/PBT (Dahnke 2013), e correção de fração de voxel; média ponderada por área na
+        superfície média, teto de 5 mm. Validada em fantomas (erro −0,05 a −0,07 mm); ainda sem
+        comparação com o <code>aparc.stats</code> do FreeSurfer nos mesmos exames. A malha 3D é só
+        para visualização.</p>
       </section>
 
       <section class="panel" id="norm-panel" hidden>
