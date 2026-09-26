@@ -72,7 +72,7 @@ resto:
 |---|---|---|
 | Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo |
 | Recorte de pescoço | `robustfov` | perfil de área de primeiro plano (Otsu) no eixo S-I detectado pela affine; mantém 170 mm do topo |
-| Correção de viés | `N4`-like | correção homomórfica só no tecido, raio em mm, **antes** da extração cerebral — **não** aplicada antes do SynthSeg (como no oficial) |
+| Correção de viés | `N4BiasFieldCorrection` | porte do N4 do ITK (Tustison et al., 2010) com os padrões do ANTs: shrink ~4 mm, B-spline cúbica com malha inicial ~200 mm, 4 níveis × 50 iterações, limiar 0,001, afinamento do histograma por Wiener; campo reproduz o SimpleITK com r ≥ 0,998 num T1 real, 1–3 s em 256³; **antes** da extração cerebral e **não** aplicado antes do SynthSeg (como no oficial); a homomórfica antiga fica só como alternativa se o N4 falhar |
 | Extração cerebral | `BET` | modelo de máscara em modo probabilidade, limiar **f configurável**, fechamento + maior componente + cavidades; máscara sobreposta para inspeção; a rede recebe só o cérebro |
 | Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara |
 
@@ -171,6 +171,12 @@ síntese** — espessuras/volumes de um FLAIR-virado-MPRAGE são estimativas, n�
 reporte sempre a sequência de origem (a proveniência vai no JSON/PDF).
 
 ### O modo robusto continua clássico
+
+O item de **contraste** da régua é o **CJV** (coeficiente de variação conjunta,
+(σ_SB + σ_SC)/|μ_SB − μ_SC|, a métrica do MRIQC; menor é melhor), estimado sem
+segmentação por mistura de 3 gaussianas nas médias de vizinhança dentro do encéfalo:
+≤ 0,90 bom, ≤ 1,20 moderado, > 1,20 pobre. É invariante a escala e deslocamento de
+intensidade; os limiares valem para este estimador (fica 0,1–0,4 acima do CJV com máscaras).
 
 Quando a régua marca C/D, o ramo robusto aplica métodos **clássicos** (reamostragem
 cúbica, correção de viés), que não criam informação. Para exame anisotrópico ou de

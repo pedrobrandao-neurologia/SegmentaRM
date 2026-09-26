@@ -1,7 +1,7 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v22'
+const CACHE = 'segmentarm-v23'
 const SHELL = [
   './',
   './index.html',
@@ -16,7 +16,7 @@ const SHELL = [
   './workers/synthsr.worker.js', './workers/reconsurf.worker.js', './workers/thickness.worker.js',
   './lib/surfaces.js', './lib/synthsr-core.js', './lib/sdf-surface.js', './lib/segqc.js', './lib/thickness.js',
   './lib/synthseg-core.js', './lib/tfjs-upsampling3d.js', './lib/fastsurfer-core.js',
-  './lib/dkt-fusion.js', './lib/normative.js', './lib/fsl-prep.js', './lib/dicom-scan.js',
+  './lib/dkt-fusion.js', './lib/normative.js', './lib/fsl-prep.js', './lib/n4.js', './lib/dicom-scan.js',
   './models/normative/brainchart.json',
   './models/normative/subcortical.json',
   './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',

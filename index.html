@@ -70,7 +70,7 @@
       </div>
       <label class="check" title="Permuta/flip de eixos pela affine, sem reamostrar, antes de tudo"><input type="checkbox" id="opt-reorient" checked> Reorientação RAS <span class="eq">≈ fslreorient2std</span></label>
       <label class="check" title="Corta FOV inferior excessivo: mantém 170 mm do topo da cabeça"><input type="checkbox" id="opt-crop"> Recorte de pescoço <span class="eq">≈ robustfov</span></label>
-      <label class="check" title="Correção homomórfica, antes da extração cerebral — a imagem corrigida alimenta o resto"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés <span class="eq">≈ N4</span></label>
+      <label class="check" title="N4 (Tustison 2010; porte do filtro do ITK), antes da extração cerebral — a imagem corrigida alimenta o resto; homomórfica como alternativa se o N4 falhar"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés <span class="eq">N4</span></label>
       <label class="check"><input type="checkbox" id="opt-smooth"> Suavização leve</label>
       <label class="check" title="Máscara MeshNet + limpeza morfológica; a rede recebe só o cérebro"><input type="checkbox" id="opt-bet"> Extração cerebral <span class="eq">≈ BET</span></label>
       <div class="field" style="margin-top:6px">
