@@ -368,6 +368,18 @@ de um z inflado; nos **lobos**, as normas das regiões eliminadas são somadas a
 as absorveu (temporal: bankssts + temporalpole; frontal: frontalpole), e aí a comparação
 continua válida.
 
+### Convenções dos números exportados
+
+- **Índice de assimetria:** `IA = 200·(E − D)/(E + D)`, em %. **Positivo = esquerda maior**,
+  negativo = direita maior, 0 = simetria (faixa −200 a +200). Calculado para cada par E/D com
+  o mesmo nome-base (`Left-`/`Right-`, `ctx-lh-`/`ctx-rh-`), sobre o volume por contagem de
+  voxels. A convenção vai também no JSON (`convencao_assimetria`), nos rótulos do SPSS e no PDF.
+- **Parcelas ausentes no DKT:** o protocolo DKT (Klein & Tourville 2012) eliminou `bankssts`,
+  `frontalpole` e `temporalpole` (absorvidos pelas regiões vizinhas). Com a parcelação DKT elas
+  não aparecem nas tabelas nem nas exportações (em vez de linhas com volume zero); o JSON
+  registra a omissão em `rotulos_omitidos`. Com o modelo DK de 104 classes (brainchop), que as
+  tem, elas continuam presentes.
+
 ## Exportações
 
 - **CSV** longo (estrutura/agregado/lobo/assimetria/superfície; decimal configurável)
