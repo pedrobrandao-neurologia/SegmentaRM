@@ -24,7 +24,7 @@ function ui (message, progressFrac = -1, modalMessage = '') {
 self.onmessage = async (ev) => {
   const {
     modelUrl, img, dims, affine, isGPU = true, tile = 128, overlap = 32,
-    flip = true, sigma = 0.5, postprocess = true, native = null
+    flip = true, sigma = 0.5, postprocess = true, native = null, crop = null
   } = ev.data
   try {
     registerUpSampling3D(tf)
@@ -48,7 +48,7 @@ self.onmessage = async (ev) => {
 
     const t0 = performance.now()
     const { seg, conf, volumes, volumesUnit } = await runSynthSeg({
-      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native,
+      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native, crop,
       onProgress: (msg, frac) => ui('SynthSeg: ' + msg + '.', frac)
     })
     model.dispose()
