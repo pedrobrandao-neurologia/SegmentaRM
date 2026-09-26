@@ -63,7 +63,8 @@ function rasAxisMap (affine) {
     let best = -1, bi = -1
     for (let a = 0; a < 3; a++) {
       if (used.has(a)) continue
-      if (Math.abs(A[w][a]) > best) { best = Math.abs(A[w][a]); bi = a }
+      const v = Math.abs(A[w][a]) / (Math.hypot(A[0][a], A[1][a], A[2][a]) || 1) // cosseno diretor
+      if (v > best) { best = v; bi = a }
     }
     used.add(bi)
     perm[w] = bi
