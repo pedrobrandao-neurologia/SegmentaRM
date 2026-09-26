@@ -3,10 +3,12 @@
 //   máscaras wm.seg/filled a partir da segmentação (regras exatas do
 //   mri_synth_surf.py) → partição hemisférica por EDT → SDFs white/pial
 //   (rede SynthDist, se instalada, ou EDT das máscaras — fallback declarado) →
-//   tesselação (surface nets ≈ mri_tessellate) → colocação pela energia da
-//   Eq. 5 (λ1=6e-4, λ2=2e-4, nsmooth 5 na white como no script) → pial a partir
-//   da white com repulsão (--repulse-surf) → χ de Euler como QC (defeitos
-//   relatados, não corrigidos — mris_fix_topology não é portável) → parcelas por
+//   tesselação (surface nets ≈ mri_tessellate) → colocação da white pela energia
+//   da Eq. 5 (λ1=6e-4, λ2=2e-4, nsmooth 5 na white como no script) → pial por
+//   RAIOS a partir da white (placePialByRay: para no nível zero da pial ou na linha
+//   média do sulco — a descida livre pelo gradiente fazia "pipoca" nos sulcos
+//   fechados) → χ de Euler e QC de malha (dobras, faces invertidas, arestas;
+//   defeitos relatados, não corrigidos — mris_fix_topology não é portável) → parcelas por
 //   amostragem (≈ sample_parc; sem sphere.reg/mris_ca_label) → espessura
 //   Fischl–Dale com teto de 5 mm (mris_place_surface --thickness ... 20 5) →
 //   área (SurfArea) e volume cinzento (GrayVol, -th3) por vértice da white →
@@ -17,17 +19,22 @@
 // caixa em vez de ~6 Float32 de 256³ (≈ 400 MB) da versão anterior.
 // Mensagem: { seg, dims, affine (flat16), labels, colormap, voxVol,
 //             engine: 'edt'|'net', img?, modelUrl?, isGPU?, tile? }
-// Resposta: { cmd:'done', meshes, stats, euler, aviso, talairach, xfm, norm, engineUsed }
+// Resposta: { cmd:'done', meshes, stats, euler, qcMalha, malhaConfiavel, aviso,
+//             talairach, xfm, norm, engineUsed }
+//   meshes[i] = { name:'lh.white'|'lh.pial'|'rh.white'|'rh.pial', kind:'white'|'pial',
+//                 hemi:'E'|'D', mz3 }
+//   qcMalha = { lh?: {...}, rh?: {...} } (ver qcMalha em lib/sdf-surface.js)
+//   malhaConfiavel = todos os hemisférios reconstruídos passaram no QC de malha
 
 import {
   surfaceNets, taubinSmooth, applyAffine, writeMz3, wellComposed,
-  spacingOfAffine, facesForAffine, vertexAreas, vertexVolumesTH3
+  spacingOfAffine, facesForAffine, vertexAreas, vertexVolumesTH3, edt3d
 } from '../lib/surfaces.js'
 import { dilate6, erode6, largestComponent, fillCavities } from '../lib/fsl-prep.js'
 import {
-  signedSdfFromMask, hemispherePartition, accumulateSyntheticNorm, maskByDilatedSeg,
-  buildNeighbors, eulerCharacteristic, placeSurface, smoothMesh,
-  talairachFromSeg, talairachXfm, escolheCanaisSdf
+  signedSdfFromMask, hemispherePartition, accumulateSyntheticNorm,
+  buildNeighbors, eulerCharacteristic, placeSurface, placePialByRay, smoothMesh,
+  qcMalha, QC_MALHA_LIMITES, talairachFromSeg, talairachXfm, escolheCanaisSdf
 } from '../lib/sdf-surface.js'
 
 function post (frac, txt) { self.postMessage({ cmd: 'progress', frac, txt }) }
@@ -112,7 +119,11 @@ function shiftAffine (A, o) {
 // sobreposição e recorte central, ≥ 4 canais de saída (0..3 = SDFs dos dois
 // hemisférios; a atribuição white/pial é decidida pelo próprio exame — ver o
 // bloco no fim desta função). Devolve as 4 SDFs indexadas na CAIXA (ordem original).
-async function netSdfs (img, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, isGPU, tile) {
+async function netSdfs (hold, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, isGPU, tile) {
+  // a imagem chega num envelope para que a ÚNICA referência seja a daqui e possa
+  // ser solta logo após o recorte (256³ Float32 = 64 MB)
+  let img = hold.img
+  hold.img = null
   const tf = await import('../vendor/tf.fesm.min.js')
   const { registerUpSampling3D } = await import('../lib/tfjs-upsampling3d.js')
   registerUpSampling3D(tf)
@@ -154,10 +165,11 @@ async function netSdfs (img, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, is
       for (let w = 0; w < 3; w++) src[perm[w]] = flip[w] > 0 ? c[w] : od[w] - 1 - c[w]
       return src[0] + src[1] * nx + src[2] * nx * ny
     }
-    const crop = new Float32Array(cd[0] * cd[1] * cd[2])
+    let crop = new Float32Array(cd[0] * cd[1] * cd[2])
     for (let k = 0; k < cd[2]; k++) for (let j = 0; j < cd[1]; j++) for (let i = 0; i < cd[0]; i++) {
       crop[i + j * cd[0] + k * cd[0] * cd[1]] = (img[origIdx(r0[0] + i, r0[1] + j, r0[2] + k)] - mn) * sc
     }
+    img = null
     // blocos T³ / sobreposição 32, saída 4 canais úteis
     // sobreposição ≤ metade do bloco: com T ≤ 32 o passo seria 0 (laço infinito)
     const T = tile, OV = Math.min(32, 2 * Math.floor(T / 4)), step = T - OV, h = OV / 2
@@ -195,11 +207,15 @@ async function netSdfs (img, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, is
       post(0.08 + 0.5 * done / total, done === total ? 'SynthDist: blocos concluídos.' : '')
       await new Promise(r => setTimeout(r, 0))
     }
+    crop = null
     // leva cada canal à caixa de trabalho (ordem original); fora da caixa da rede,
-    // +5 = longe da superfície. Valores não finitos também viram +5 (e são contados)
+    // +5 = longe da superfície. Valores não finitos também viram +5 (e são contados).
+    // Cada canal da grade da rede é solto logo depois de copiado (pico de memória)
     const [bx, by, bz] = box.d
     let naoFinitos = 0
-    const sdfs = outC.map(ch => {
+    const sdfs = [0, 1, 2, 3].map(ci => {
+      const ch = outC[ci]
+      outC[ci] = null
       const out = new Float32Array(bx * by * bz)
       const c = [0, 0, 0]
       for (let k = 0, v = 0; k < bz; k++) for (let j = 0; j < by; j++) for (let i = 0; i < bx; i++, v++) {
@@ -335,7 +351,9 @@ self.onmessage = async (ev) => {
         post(0.06, `Rede SynthDist exige grade de 1 mm (esta tem ${sp.map(s => s.toFixed(2)).join('×')} mm) — usando SDF por EDT das máscaras.`)
       } else {
         try {
-          net = await netSdfs(img, dims, affine, box, ctxH[0], ctxH[1], ctxMask, modelUrl, isGPU, tile)
+          const hold = { img }
+          img = null
+          net = await netSdfs(hold, dims, affine, box, ctxH[0], ctxH[1], ctxMask, modelUrl, isGPU, tile)
           engineUsed = 'net'
         } catch (e) {
           post(0.06, `Rede SynthDist indisponível (${e.message}) — usando SDF por EDT das máscaras.`)
@@ -343,6 +361,27 @@ self.onmessage = async (ev) => {
       }
     }
     img = null
+    // "longe": fora da segmentação dilatada de 3 mm. Serve (a) à rede — a SynthDist
+    // produz níveis zero espúrios no escalpo/fundo (SDF negativa longe do encéfalo),
+    // que viram +5 (longe de qualquer superfície) — e (b) à máscara do norm
+    // sintético (a mesma dilatação de 3 mm do mri_synth_surf). Uma EDT só.
+    const longe = new Uint8Array(nB)
+    {
+      const d2 = edt3d(segMask, bd, sp)
+      for (let v = 0; v < nB; v++) if (d2[v] > 9) longe[v] = 1
+    }
+    if (net) {
+      let nEsp = 0
+      for (const k of ['lhW', 'lhP', 'rhW', 'rhP']) {
+        const S = net[k]
+        for (let v = 0; v < nB; v++) {
+          if (!longe[v]) continue
+          if (S[v] < 0) nEsp++
+          S[v] = 5
+        }
+      }
+      if (nEsp) post(0.6, `SynthDist: ${nEsp.toLocaleString('pt-BR')} valores de SDF negativos (somando os 4 canais) a > 3 mm do encéfalo — níveis zero espúrios no escalpo/fundo — neutralizados (+5).`)
+    }
     if (!net) post(0.1, 'SDFs por EDT exata das máscaras (±5 mm, negativa por dentro), por hemisfério…')
 
     // amostrador de parcela (≈ sample_parc): rótulo de córtex mais próximo (em mm)
@@ -376,6 +415,7 @@ self.onmessage = async (ev) => {
     const normB = new Float32Array(nB)
     const meshes = []
     const euler = {}
+    const qc = {}
     const names = ['esquerdo', 'direito']
     for (let h = 0; h < 2; h++) {
       const base = 0.38 + h * 0.28
@@ -416,13 +456,17 @@ self.onmessage = async (ev) => {
       // antes da colocação (MRISaverageVertexPositions); suavizar depois tiraria a
       // white do nível zero (encolhimento de ~0,3 mm nas cristas)
       smoothMesh(wv, faces, 5, 0.5, neigh)
-      const rw = placeSurface(wv, faces, W, bd, { spacing: sp, neigh, onIter: (it) => { if (it % 25 === 0) post(base + 0.05 + 0.04 * Math.min(1, it / 100), '') } })
-      post(base + 0.12, `Hemisfério ${names[h]}: white em ${rw.iters} iterações; colocando a pial (repulsão da white)…`)
-      const pv = Float32Array.from(wv)
-      const rp = placeSurface(pv, faces, P, bd, { repulse: W, spacing: sp, neigh, onIter: (it) => { if (it % 25 === 0) post(base + 0.12 + 0.06 * Math.min(1, it / 120), '') } })
+      const rw = placeSurface(wv, faces, W, bd, { spacing: sp, neigh, onIter: (it) => { if (it % 25 === 0) post(base + 0.05 + 0.08 * Math.min(1, it / 150), '') } })
+      if (rw.naoFinitos) post(base + 0.13, `AVISO: hemisfério ${names[h]} — ${rw.naoFinitos} passos com SDF não finita ignorados na colocação da white.`)
+      post(base + 0.13, `Hemisfério ${names[h]}: white em ${rw.iters} iterações; pial por raios a partir da white (nível zero da pial ou linha média do sulco, teto 5 mm)…`)
+      const rp = placePialByRay(wv, faces, W, P, bd, { spacing: sp, neigh, onProgress: (f) => post(base + 0.13 + 0.05 * f, '') })
+      const pv = rp.verts
       W = null; P = null; pial[h] = null
-      if (rw.naoFinitos || rp.naoFinitos) post(base + 0.19, `AVISO: hemisfério ${names[h]} — ${rw.naoFinitos + rp.naoFinitos} passos com SDF não finita ignorados na colocação.`)
-      post(base + 0.2, `Hemisfério ${names[h]}: pial em ${rp.iters} iterações; parcelas, cores e espessura…`)
+      {
+        const m = rp.motivo, tot = m.pial + m.sulco + m.teto + m.nula || 1
+        const pc = (x) => (100 * x / tot).toFixed(0)
+        post(base + 0.18, `Hemisfério ${names[h]}: raios pararam na pial ${pc(m.pial)}% · linha média do sulco ${pc(m.sulco)}% · teto 5 mm ${pc(m.teto)}% · white já fora da pial ${pc(m.nula)}%.`)
+      }
 
       // parcelas por vértice: rótulo DKT amostrado no meio da espessura (entre o
       // vértice da white e o da pial correspondente), onde a fita cortical está
@@ -436,6 +480,12 @@ self.onmessage = async (ev) => {
       // como o mris_anatomical_stats -th3 (aparc.stats usa a white)
       const wmm = applyAffine(wv, AB)
       const pmm = applyAffine(pv, AB)
+      // QC automático da malha (em mm): dobras, faces invertidas, arestas, χ
+      const hk = h === 0 ? 'lh' : 'rh'
+      const q = qcMalha(wmm, pmm, faces)
+      qc[hk] = q
+      post(base + 0.2, `QC da malha (${names[h]}): dobras >120° pial ${q.dobrasPialPct}% (white ${q.dobrasWhitePct}%) · faces invertidas pial×white ${q.invertidasPct}% · aresta p99 pial ${q.arestaP99Pial_mm} mm · χ ${q.euler} → ${q.confiavel ? 'malha confiável para visualização' : 'malha NÃO confiável'}.`)
+      post(base + 0.2, `Hemisfério ${names[h]}: parcelas, cores e espessura…`)
       const vArea = vertexAreas(wmm, faces)
       const vVol = vertexVolumesTH3(wmm, pmm, faces)
       // espessura Fischl–Dale com correspondência + vértice mais próximo; como no
@@ -500,7 +550,7 @@ self.onmessage = async (ev) => {
 
     // norm: mascarado pela segmentação dilatada (r = 3 mm) e devolvido no volume inteiro
     post(0.95, 'Imagem sintética norm (córtex super-resolvido, fórmula do mri_synth_surf)…')
-    maskByDilatedSeg(normB, segMask, bd, 3, sp)
+    for (let v = 0; v < nB; v++) if (longe[v]) normB[v] = 0
     const norm = new Float32Array(n)
     for (let k = 0; k < bd[2]; k++) for (let j = 0; j < bd[1]; j++) {
       const dst = box.o[0] + (box.o[1] + j) * nx + (box.o[2] + k) * nx * ny
@@ -528,6 +578,8 @@ self.onmessage = async (ev) => {
       })
     }
     stats.sort((a, b) => a.base === b.base ? a.hemi.localeCompare(b.hemi) : a.base.localeCompare(b.base))
+    const qcs = Object.values(qc)
+    const malhaConfiavel = qcs.length > 0 && qcs.every(q => q.confiavel)
     post(0.98, `Superfícies recon-clinical prontas: ${meshes.length} malhas, ${stats.length} regiões (motor ${engineUsed === 'net' ? 'rede SynthDist' : 'SDF por EDT'}).`)
     self.postMessage({
       cmd: 'done',
@@ -535,6 +587,9 @@ self.onmessage = async (ev) => {
       stats,
       aviso,
       euler,
+      qcMalha: qc,
+      qcLimites: QC_MALHA_LIMITES,
+      malhaConfiavel,
       engineUsed,
       talairach: tal ? { M: tal.M, nUsed: tal.nUsed } : null,
       xfm: tal ? talairachXfm(tal.M) : null,

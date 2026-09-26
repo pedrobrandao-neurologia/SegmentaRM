@@ -3,9 +3,12 @@
 //  2. recorte de pescoço (≈ robustfov) — heurística no perfil do eixo S-I, mantém 170 mm do topo
 //  3. reamostragem cúbica Catmull-Rom dos eixos espessos para ~isotrópico (ramo robusto;
 //     inspirado no papel do SynthSR dentro do recon-all-clinical, mas por métodos clássicos)
-//  4. correção homomórfica de campo de viés (log → passa-baixa normalizada no tecido →
-//     divisão; raio em mm) — ANTES da extração cerebral, para que a imagem corrigida
-//     alimente as etapas seguintes
+//  4. correção de campo de viés N4 (Tustison et al., IEEE TMI 2010 — o algoritmo do
+//     N4BiasFieldCorrection do ANTs/ITK, em lib/n4.js: sharpening do histograma do log por
+//     deconvolução de Wiener + ajuste B-spline cúbico multi-resolução numa versão reduzida,
+//     campo aplicado na grade inteira) — ANTES da extração cerebral, para que a imagem
+//     corrigida alimente as etapas seguintes. Se o N4 falhar, cai na correção homomórfica
+//     (lib/fsl-prep.js › biasCorrect), declarada na proveniência (prov.vies.fallback)
 //  5. suavização gaussiana leve (opcional)
 // Mensagem de entrada: { data: Float32Array, dims:[nx,ny,nz], pixDims:[dx,dy,dz],
 //                        affine: number[16] row-major, targetIso: 1.0,
@@ -13,6 +16,7 @@
 // Saída: { cmd:'done', data, dims, pixDims, affine, prov } com progressos { cmd:'progress', frac, txt }
 
 import { reorientToRAS, cropNeck, resampleAxis, biasCorrect, gaussianish } from '../lib/fsl-prep.js'
+import { n4BiasFieldCorrection } from '../lib/n4.js'
 
 function post (frac, txt) { self.postMessage({ cmd: 'progress', frac, txt }) }
 
@@ -71,10 +75,37 @@ self.onmessage = (ev) => {
     }
 
     if (doBias) {
-      post(0.68, 'Correção homomórfica de campo de viés (antes da extração cerebral)')
-      const b = biasCorrect(cur, curDims, curPix)
-      cur = b.data
-      prov.vies = { aplicado: true, metodo: 'homomorfico (convolução normalizada no tecido)', raioMM: b.radiusMM, raioVoxels: b.radius }
+      post(0.68, 'Correção de campo de viés — N4 (Tustison 2010), antes da extração cerebral')
+      try {
+        const r = n4BiasFieldCorrection(cur, curDims, curPix, {
+          shrinkFactor: 4, splineDistanceMM: 200, iterations: [50, 50, 50, 50], convergence: 0.001,
+          bins: 200, fwhm: 0.15, wienerNoise: 0.01,
+          onProgress: (f, txt) => post(0.68 + 0.16 * f, txt)
+        })
+        cur = r.data
+        post(0.84, '· ' + r.log)
+        prov.vies = {
+          aplicado: true,
+          metodo: 'N4 (Tustison et al., IEEE TMI 2010) — algoritmo do N4BiasFieldCorrection (ANTs/ITK)',
+          fallback: false,
+          parametros: r.params,
+          iteracoesPorNivel: r.iterationsPerLevel,
+          convergenciaPorNivel: r.convergencePerLevel.map(c => Number(c.toPrecision(3))),
+          faixaCampo: r.fieldRange.map(v => Number(v.toFixed(3))),
+          voxelsMascaraReduzida: r.maskVoxelsReduced,
+          tempoS: Number((r.ms / 1000).toFixed(1))
+        }
+      } catch (e) {
+        const motivo = String(e && e.message || e)
+        post(0.72, `N4 (Tustison 2010) falhou (${motivo}) — usando a correção homomórfica como alternativa`)
+        const b = biasCorrect(cur, curDims, curPix)
+        cur = b.data
+        prov.vies = {
+          aplicado: true,
+          metodo: 'homomórfico (convolução normalizada no tecido) — alternativa após falha do N4',
+          fallback: true, motivoFallback: motivo, raioMM: b.radiusMM, raioVoxels: b.radius
+        }
+      }
     }
     if (doSmooth) {
       post(0.85, 'Suavização leve')

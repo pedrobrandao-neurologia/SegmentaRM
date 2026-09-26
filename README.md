@@ -72,7 +72,7 @@ resto:
 |---|---|---|
 | Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo |
 | Recorte de pescoço | `robustfov` | perfil de área de primeiro plano (Otsu) no eixo S-I detectado pela affine; mantém 170 mm do topo |
-| Correção de viés | `N4`-like | correção homomórfica só no tecido, raio em mm, **antes** da extração cerebral — **não** aplicada antes do SynthSeg (como no oficial) |
+| Correção de viés | `N4BiasFieldCorrection` | porte do N4 do ITK (Tustison et al., 2010) com os padrões do ANTs: shrink ~4 mm, B-spline cúbica com malha inicial ~200 mm, 4 níveis × 50 iterações, limiar 0,001, afinamento do histograma por Wiener; campo reproduz o SimpleITK com r ≥ 0,998 num T1 real, 1–3 s em 256³; **antes** da extração cerebral e **não** aplicado antes do SynthSeg (como no oficial); a homomórfica antiga fica só como alternativa se o N4 falhar |
 | Extração cerebral | `BET` | modelo de máscara em modo probabilidade, limiar **f configurável**, fechamento + maior componente + cavidades; máscara sobreposta para inspeção; a rede recebe só o cérebro |
 | Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara |
 
@@ -171,6 +171,12 @@ síntese** — espessuras/volumes de um FLAIR-virado-MPRAGE são estimativas, n�
 reporte sempre a sequência de origem (a proveniência vai no JSON/PDF).
 
 ### O modo robusto continua clássico
+
+O item de **contraste** da régua é o **CJV** (coeficiente de variação conjunta,
+(σ_SB + σ_SC)/|μ_SB − μ_SC|, a métrica do MRIQC; menor é melhor), estimado sem
+segmentação por mistura de 3 gaussianas nas médias de vizinhança dentro do encéfalo:
+≤ 0,90 bom, ≤ 1,20 moderado, > 1,20 pobre. É invariante a escala e deslocamento de
+intensidade; os limiares valem para este estimador (fica 0,1–0,4 acima do CJV com máscaras).
 
 Quando a régua marca C/D, o ramo robusto aplica métodos **clássicos** (reamostragem
 cúbica, correção de viés), que não criam informação. Para exame anisotrópico ou de
@@ -347,6 +353,28 @@ em todas as exportações. O mapa de fidelidade da seção anterior diz exatamen
 reprodução do recon-all-clinical e o que é aproximação; o JSON/PDF registram o motor de
 SDF usado (rede SynthDist ou EDT) e o χ de Euler de cada execução.
 
+## Volume intracraniano (VIC ≈ eTIV)
+
+O SynthSeg 1.0 não rotula o líquor extracerebral, então a soma dos rótulos **não** é o
+volume intracraniano. Após a segmentação, o T1 conformado (cabeça inteira, antes de
+qualquer extração cerebral) é registrado por um **afim de 12 parâmetros** (correlação
+normalizada, Levenberg–Marquardt, 8 → 4 → 2 mm, 90 inícios, pesos de Tukey) ao template
+**MNI152 2009c** embutido em `lib/icv.js` (licença MNI/McGill, `licenses/mni152.txt`); o
+VIC é `K × det(A)` com K = 2 172 000 mm³, calibrado para a **escala do eTIV do FreeSurfer**
+(Buckner et al., *NeuroImage* 2004), o mesmo princípio do `mri_segstats --etiv`.
+
+Validação (31 adultos do OpenNeuro com recon-all): r = 0,92 com o eTIV do FreeSurfer, viés
+±1% e DP 2,5–4% com K calibrado num conjunto e testado no outro (o afim do ANTs com
+informação mútua deu r = 0,79 nos mesmos sujeitos); reescalas ×0,9/×1,1 recuperadas com
+erro < 0,2%; rotação de 15° e recorte de pescoço mudam o VIC ≤ 0,1%. ~4–5 s no navegador.
+
+O VIC aparece como cartão nos resultados, como coluna **% VIC** na tabela e sai no CSV
+(linha `vic` e coluna `pct_vic`), no JSON (`volume_intracraniano`), na planilha larga
+(`eTIV`, pronta como covariável) e na capa do PDF. Avisos automáticos: registro de baixa
+qualidade, imagem já sem crânio (o VIC fica extrapolado), FOV cortado, escala fora da
+faixa, fração cerebral implausível. Não é estimado com o SynthSR ativo (T1 sintético sem
+crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covariável.
+
 ## Comparação normativa (QC, não clínico)
 
 Informando **idade e sexo**, os volumes são comparados com as curvas populacionais dos
@@ -358,6 +386,18 @@ parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 vira aler
 erro de segmentação** no painel e no PDF. As normas foram ajustadas em volumes FreeSurfer;
 os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clínico.
 
+**Estruturas subcorticais regionais.** Tálamo, caudado, putâmen, pálido, hipocampo,
+amígdala e accumbens, por **hemisfério e sexo**, são comparados com os modelos GAMLSS do
+**CentileBrain** (Ge et al., *Lancet Digit Health* 2024; grupo ENIGMA Lifespan de Dima et
+al., *Hum Brain Mapp* 2022; ~36 mil controles, 3–90 anos, FreeSurfer aseg harmonizado por
+ComBat-GAM). Os centis foram tirados offline dos modelos oficiais
+(`tools/extract_centilebrain_subcortical.R` → `models/normative/subcortical.json`) e o JS
+reproduz o R com erro de z ≤ 0,003 entre P5 e P95. Ressalvas: o SynthSeg difere do aseg de
+forma sistemática por estrutura (o z pode ter viés), não há ajuste por volume intracraniano
+e o exame isolado não passa pela harmonização do treino. O repositório CentileBrain não traz
+licença explícita (apenas "for research purpose"); os centis são redistribuídos aqui para
+pesquisa, com citação — confirme com os autores antes de uso comercial.
+
 **DKT × normas DK.** As normas regionais dos brain charts são do atlas **DK**; o protocolo
 **DKT** (Klein & Tourville, *Front Neurosci* 2012) eliminou bankssts, frontalpole e
 temporalpole, cujo tecido foi absorvido pelas regiões adjacentes sem partilha definida.
@@ -367,6 +407,18 @@ rostral, orbitofrontais medial e lateral) saem **sem z** ("sem norma comparável
 de um z inflado; nos **lobos**, as normas das regiões eliminadas são somadas ao lobo que
 as absorveu (temporal: bankssts + temporalpole; frontal: frontalpole), e aí a comparação
 continua válida.
+
+### Convenções dos números exportados
+
+- **Índice de assimetria:** `IA = 200·(E − D)/(E + D)`, em %. **Positivo = esquerda maior**,
+  negativo = direita maior, 0 = simetria (faixa −200 a +200). Calculado para cada par E/D com
+  o mesmo nome-base (`Left-`/`Right-`, `ctx-lh-`/`ctx-rh-`), sobre o volume por contagem de
+  voxels. A convenção vai também no JSON (`convencao_assimetria`), nos rótulos do SPSS e no PDF.
+- **Parcelas ausentes no DKT:** o protocolo DKT (Klein & Tourville 2012) eliminou `bankssts`,
+  `frontalpole` e `temporalpole` (absorvidos pelas regiões vizinhas). Com a parcelação DKT elas
+  não aparecem nas tabelas nem nas exportações (em vez de linhas com volume zero); o JSON
+  registra a omissão em `rotulos_omitidos`. Com o modelo DK de 104 classes (brainchop), que as
+  tem, elas continuam presentes.
 
 ## Exportações
 
@@ -443,6 +495,8 @@ models/synthsurf/                      SynthDist em tfjs f16 (26,5 MB) + fixture
 models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts de redução
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
+models/normative/subcortical.json      centis subcorticais (CentileBrain)
+lib/icv.js · workers/icv.worker.js    volume intracraniano (eTIV) por registro afim ao MNI152
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
 tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
@@ -534,6 +588,11 @@ vermelho-córtex com princípios das HIG da Apple e equivalentes para
 - **Brain charts** — Bethlehem, Seidlitz, White et al.
   ([brainchart/Lifespan](https://github.com/brainchart/Lifespan)). Cite *Brain charts for
   the human lifespan* (Nature, 2022).
+- **CentileBrain** — Ge, Yu, Qi et al.
+  ([CentileBrain/centilebrain](https://github.com/CentileBrain/centilebrain), sem licença
+  explícita; uso em pesquisa): normas subcorticais regionais. Cite *Normative modelling of
+  brain morphometry across the lifespan with CentileBrain* (Lancet Digit Health, 2024) e
+  Dima et al., *Subcortical volumes across the lifespan* (Hum Brain Mapp, 2022).
 - **brainchop** — Masoud, Hu & Plis (MIT); **brain2print** — grupo de Chris Rorden (MIT):
   worker de inferência e modelos MeshNet.
 - **NiiVue** e **dcm2niix** — Rorden e colaboradores.

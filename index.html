@@ -70,7 +70,7 @@
       </div>
       <label class="check" title="Permuta/flip de eixos pela affine, sem reamostrar, antes de tudo"><input type="checkbox" id="opt-reorient" checked> Reorientação RAS <span class="eq">≈ fslreorient2std</span></label>
       <label class="check" title="Corta FOV inferior excessivo: mantém 170 mm do topo da cabeça"><input type="checkbox" id="opt-crop"> Recorte de pescoço <span class="eq">≈ robustfov</span></label>
-      <label class="check" title="Correção homomórfica, antes da extração cerebral — a imagem corrigida alimenta o resto"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés <span class="eq">≈ N4</span></label>
+      <label class="check" title="N4 (Tustison 2010; porte do filtro do ITK), antes da extração cerebral — a imagem corrigida alimenta o resto; homomórfica como alternativa se o N4 falhar"><input type="checkbox" id="opt-bias" checked> Correção de campo de viés <span class="eq">N4</span></label>
       <label class="check"><input type="checkbox" id="opt-smooth"> Suavização leve</label>
       <label class="check" title="Máscara MeshNet + limpeza morfológica; a rede recebe só o cérebro"><input type="checkbox" id="opt-bet"> Extração cerebral <span class="eq">≈ BET</span></label>
       <div class="field" style="margin-top:6px">
@@ -151,6 +151,14 @@
       </div>
       <button class="btn" id="run-surf" disabled>Reconstruir superfícies</button>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="show-surf" disabled> Mostrar 3D no visualizador</label>
+      <div class="field" style="margin-top:6px">
+        <label for="surf-show-kind">Superfície exibida</label>
+        <select id="surf-show-kind">
+          <option value="pial" selected>Pial (borda externa do córtex)</option>
+          <option value="white">Branca (limite substância branca/córtex)</option>
+          <option value="both">Ambas (pial translúcida)</option>
+        </select>
+      </div>
       <p class="note">Fluxo do <code>recon-all-clinical</code>: máscaras <code>wm.seg</code>/<code>filled</code>
       pelas regras do <code>mri_synth_surf</code> → SDFs white/pial (rede SynthDist se instalada —
       veja <code>licenses/synthsurf.txt</code> — ou EDT das máscaras) → colocação pela energia do
@@ -258,12 +266,16 @@
       </section>
 
       <section class="panel" id="surf-panel" hidden>
-        <h3>Superfície cortical — espessura e área <span class="badge-exp">em revisão · não exportado</span></h3>
-        <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Fluxo recon-all-clinical: superfícies colocadas nas SDFs white/pial
-        (energia do artigo, λ₁/λ₂ de Dale 1999), espessura por pareamento branca↔pial
-        (Fischl &amp; Dale 2000, teto 5 mm), área regional medida na white (como o
-        <code>aparc.stats</code>); χ de Euler relatado como QC de topologia.</p>
+        <h3>Espessura cortical — por região DKT <span class="badge-exp">em revisão · não exportado</span></h3>
+        <p class="note" id="thick-summary" style="margin:0 0 8px"></p>
+        <div class="tablewrap" style="max-height:300px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
+        <p class="note">Espessura <b>volumétrica</b> (sem malha): equação de Laplace entre a borda da
+        substância branca e a borda externa do córtex e comprimentos das linhas de corrente
+        (Jones 2000; Yezzi &amp; Prince 2003), com os sulcos fechados reconstruídos pela linha média,
+        como no CAT12/PBT (Dahnke 2013), e correção de fração de voxel; média ponderada por área na
+        superfície média, teto de 5 mm. Validada em fantomas (erro −0,05 a −0,07 mm); ainda sem
+        comparação com o <code>aparc.stats</code> do FreeSurfer nos mesmos exames. A malha 3D é só
+        para visualização.</p>
       </section>
 
       <section class="panel" id="norm-panel" hidden>
@@ -271,6 +283,7 @@
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
         <p class="note">Brain charts (Bethlehem et al., Nature 2022). Aproximação para QC — não clínico;
         |z| ≥ 4 sugere erro de segmentação.</p>
+        <p class="note" id="norm-sub-note" hidden></p>
       </section>
 
       <section class="panel">
@@ -278,7 +291,7 @@
         <div class="legend">
           <span><i style="background:#E0655A"></i>esquerda</span>
           <span><i style="background:#5E7286"></i>direita</span>
-          <span>IA = 200·(E−D)/(E+D)</span>
+          <span title="Índice de assimetria em %: positivo = esquerda maior, negativo = direita maior; 0 = simetria">IA = 200·(E−D)/(E+D) · + = esquerda maior</span>
         </div>
         <div class="ladder" id="ladder"></div>
       </section>

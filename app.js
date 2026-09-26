@@ -23,6 +23,10 @@ const VERSION = '1.0.0'
 // NADA do passo 05 entra nas exportações (CSV/JSON/SAV/PDF/ZIP/coorte, MZ3, norm,
 // talairach.xfm). Reative aqui quando o passo estiver validado.
 const SURF_EXPORT = false
+// Espessura cortical volumétrica (passo 05): validada em fantomas, ainda sem comparação
+// com o FreeSurfer nos mesmos exames — aparece na tela, mas só entra nas exportações
+// quando esta chave for ligada.
+const THICK_EXPORT = false
 const $ = (id) => document.getElementById(id)
 
 // seleção de modelo → índice em inferenceModelsList (ids 1-based)
@@ -840,6 +844,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
     state.native = null
     state.synthsr = null
     state.bet = null
+    state.icv = null
     state.pipelineUsed = ''
   }
   state.seg = null
@@ -853,6 +858,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.norms = null
   state.qc = null
   state.surf = null
+  state.thick = null
   state.modelUsed = ''
   viewCache.clear()
   $('show-surf').checked = false
@@ -1302,6 +1308,7 @@ async function applySegmentationResult (labelsPath, colormapPath) {
       log('QC não calculado: ' + e.message, 'err')
       state.qc = null
     }
+    await updateIcv()
     await updateNorms()
     $('step-export').hidden = false
     updateIntermediateExports()
@@ -1458,6 +1465,25 @@ async function runSurfStep () {
   }
   setBusy(true)
   viewCache.delete('norm')
+  // 1) espessura volumétrica (as medidas): roda primeiro e sobrevive a uma falha da malha
+  try {
+    log('Espessura cortical volumétrica: Laplace entre as bordas do córtex (Yezzi & Prince 2003), sulcos fechados reconstruídos pela linha média (CAT12/PBT)…')
+    const t0 = performance.now()
+    state.thick = await runThicknessWorker()
+    renderThick()
+    const h = state.thick.hemisferios || {}
+    const f = (x) => x == null ? '—' : x.toFixed(2)
+    log(`Espessura volumétrica pronta em ${((performance.now() - t0) / 1000).toFixed(0)} s: média E ${f(h.lh && h.lh.espessura_media_mm)} · D ${f(h.rh && h.rh.espessura_media_mm)} mm (${state.thick.regioes.length} regiões).`, 'ok')
+    tlNote('surf', `espessura volumétrica (Laplace + reconstrução sulcal): média E ${f(h.lh && h.lh.espessura_media_mm)} · D ${f(h.rh && h.rh.espessura_media_mm)} mm`, 'info')
+  } catch (e) {
+    state.thick = null
+    if (e && e.cancelled) { // cancelar interrompe o passo 05, não vira "falha da espessura"
+      stepError('05 · Superfícies', e); progress(0); setBusy(false); return
+    }
+    log('Espessura volumétrica não calculada: ' + e.message, 'err')
+    tlNote('surf', 'espessura volumétrica falhou: ' + e.message, 'warn')
+  }
+  // 2) malhas white/pial — só para visualização
   try {
     // motor recon-all-clinical: SDF da rede SynthDist quando os pesos convertidos
     // estiverem em models/synthsurf/ (traga-seus-pesos; licença do FreeSurfer),
@@ -1473,7 +1499,7 @@ async function runSurfStep () {
         engine = 'edt'
       }
     }
-    log(`Superfícies no fluxo recon-all-clinical: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → colocação pela energia da Eq. 5 → espessura Fischl–Dale…`)
+    log(`Malhas para visualização: SDFs ${engine === 'net' ? 'pela rede SynthDist' : 'por EDT das máscaras'} → white pela energia da Eq. 5 → pial por raio a partir da white…`)
     const r = await new Promise((resolve, reject) => {
       const w = new Worker('./workers/reconsurf.worker.js', { type: 'module' })
       const release = trackWorker(w, reject)
@@ -1511,9 +1537,19 @@ async function runSurfStep () {
       motor: r.engineUsed === 'net' ? 'rede SynthDist' : 'SDF por EDT das máscaras',
       xfm: r.xfm || null,
       talairachRotulos: r.talairach ? r.talairach.nUsed : 0,
-      norm: r.norm || null
+      norm: r.norm || null,
+      qcMalha: r.qcMalha || null,
+      malhaConfiavel: r.malhaConfiavel !== false
     }
-    renderSurfStats()
+    // a malha serve à VISUALIZAÇÃO; as medidas (espessura) vêm do método volumétrico
+    if (r.qcMalha) {
+      for (const [h, q] of Object.entries(r.qcMalha)) {
+        if (!q) continue
+        const txt = `malha ${h === 'lh' ? 'esquerda' : 'direita'}: dobras ${q.dobrasPialPct.toFixed(1)}% · faces invertidas ${q.invertidasPct.toFixed(1)}% · aresta p99 ${q.arestaP99Pial_mm.toFixed(1)} mm · χ ${q.euler}` + (q.confiavel ? ' — boa para visualização' : ' — ABAIXO do limite de qualidade')
+        log('· QC ' + txt, q.confiavel ? '' : 'err')
+        tlNote('surf', 'QC da ' + txt, q.confiavel ? 'info' : 'warn')
+      }
+    }
     $('show-surf').checked = true
     syncButtons()
     await ensureViewerAlive()
@@ -1534,12 +1570,107 @@ async function runSurfStep () {
     ], (r.aviso || (r.euler && !eulOk)) ? 'warn' : 'ok')
     progress(0)
   } catch (e) {
-    log('Erro nas superfícies — o resultado DKT permanece intacto: ' + e.message, 'err')
+    log('Erro nas malhas — o resultado DKT' + (state.thick ? ' e a espessura volumétrica permanecem' : ' permanece') + ' intacto: ' + e.message, 'err')
     stepError('05 · Superfícies', e, e.diag || null)
     progress(0)
   } finally {
     setBusy(false)
   }
+}
+
+// espessura cortical volumétrica em worker próprio (lib/thickness.js)
+// ---------- volume intracraniano estimado (VIC ≈ eTIV) ----------
+// registro afim do T1 conformado (cabeça inteira, antes de qualquer extração cerebral) ao
+// MNI152 2009c embutido em lib/icv.js; VIC = K × det(A) na escala do eTIV do FreeSurfer.
+// Calculado uma vez por conformação (não depende dos rótulos; a segmentação só valida).
+function runIcvWorker () {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/icv.worker.js', { type: 'module' })
+    const release = trackWorker(w, reject)
+    w.onmessage = (ev) => {
+      const m = ev.data
+      if (m.cmd === 'progress') { progress(0.95 + (m.frac || 0) * 0.04) }
+      else if (m.cmd === 'done') { release(); resolve(m) }
+      else if (m.cmd === 'error') { release(); reject(new Error(m.message)) }
+    }
+    w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker do VIC')) }
+    const src = state.conformed.img
+    const img = src instanceof Uint8Array ? new Uint8Array(src) : Uint8Array.from(src, v => Math.max(0, Math.min(255, Math.round(v))))
+    const seg = state.seg ? new Uint8Array(state.seg) : null
+    w.postMessage({
+      img, dims: dimsOf(state.conformed), affine: affineOf(state.conformed).flat(), seg, labels: state.labelsMap
+    }, seg ? [img.buffer, seg.buffer] : [img.buffer])
+  })
+}
+
+async function updateIcv () {
+  if (state.icv || !state.conformed) return
+  if (state.synthsr) {
+    log('VIC não estimado: o SynthSR gera um T1 sintético sem crânio — o registro ao template precisa da cabeça inteira.')
+    return
+  }
+  try {
+    log('Estimando o volume intracraniano (eTIV: registro afim ao MNI152)…')
+    await yieldUI()
+    const r = await runIcvWorker()
+    state.icv = { vic_mm3: r.vic_mm3, metodo: r.metodo, aviso: r.aviso, detalhes: r.detalhes }
+    const fc = r.detalhes && r.detalhes.frac_cerebral
+    log(`Volume intracraniano (eTIV): ${(r.vic_mm3 / 1000).toFixed(0)} cm³` +
+      (fc != null ? ` · fração cerebral ${fc.toFixed(2)}` : '') +
+      (r.detalhes && r.detalhes.tempo_ms ? ` (${(r.detalhes.tempo_ms / 1000).toFixed(1)} s)` : '') + '.', r.aviso ? '' : 'ok')
+    if (r.aviso) log('VIC — atenção: ' + r.aviso, 'err')
+    if (TL.current) tlNote(TL.current, `VIC (eTIV) ${(r.vic_mm3 / 1000).toFixed(0)} cm³` + (r.aviso ? ' — ' + r.aviso : ''), r.aviso ? 'warn' : 'info')
+    if (state.stats) renderResults()
+  } catch (e) {
+    state.icv = null
+    // cancelar durante o VIC encerra só ele: a segmentação já pronta permanece (e o
+    // pipeline completo para, via state.chainCancelled)
+    if (e && e.cancelled) { log('VIC cancelado — a segmentação permanece.', 'err'); return }
+    log('VIC não estimado: ' + e.message, 'err')
+  }
+}
+
+function runThicknessWorker () {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/thickness.worker.js', { type: 'module' })
+    const release = trackWorker(w, reject)
+    w.onmessage = (ev) => {
+      const m = ev.data
+      if (m.cmd === 'progress') { if (m.txt) log('· ' + m.txt); progress(0.05 + (m.frac || 0) * 0.3) }
+      else if (m.cmd === 'done') { release(); resolve(m) }
+      else if (m.cmd === 'error') { release(); reject(new Error(m.message)) }
+    }
+    w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker de espessura')) }
+    const segCopy = new Uint8Array(state.seg)
+    w.postMessage({
+      seg: segCopy,
+      dims: dimsOf(state.conformed),
+      affine: affineOf(state.conformed).flat(),
+      labels: state.labelsMap,
+      voxVol: voxVolOf(state.conformed)
+    }, [segCopy.buffer])
+  })
+}
+
+function renderThick () {
+  const t = state.thick
+  if (!t) return
+  const tb = $('surf-table')
+  const fmt = (x, d = 2) => x == null || !isFinite(x) ? '—' : (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+  tb.querySelector('thead').innerHTML = '<tr><th>Região</th><th>H</th><th title="média ponderada por área na superfície média ± DP">Espessura (mm)</th><th>Mediana</th><th title="área da superfície média (u = 0,5)">Área (cm²)</th></tr>'
+  const rows = t.regioes.slice().sort((a, b) => String(a.parcela).localeCompare(String(b.parcela)) || String(a.hemi).localeCompare(String(b.hemi)))
+  tb.querySelector('tbody').innerHTML = rows.map(r =>
+    `<tr><td>${ptNameOf(r.name).replace(/ — (esquerd|direit)[oa]$/, '')}</td><td>${r.hemi === 'lh' || r.hemi === 'E' ? 'E' : 'D'}</td>` +
+    `<td>${fmt(r.espessura_media_mm)} ± ${fmt(r.espessura_dp_mm)}</td><td>${fmt(r.espessura_mediana_mm)}</td>` +
+    `<td>${fmt(r.area_superficie_media_mm2 / 100, 1)}</td></tr>`).join('')
+  const h = t.hemisferios || {}
+  const hs = (k, nm) => h[k] ? `${nm} ${fmt(h[k].espessura_media_mm)} mm (mediana ${fmt(h[k].espessura_mediana_mm)})` : null
+  const qh = (t.qc && t.qc.hemisferios) || {}
+  const trunc = Object.values(qh).map(q => q.frac_truncados_5mm).filter(x => x != null)
+  $('thick-summary').textContent = [hs('lh', 'Esquerdo'), hs('rh', 'Direito')].filter(Boolean).join(' · ') +
+    (trunc.length ? ` · ${fmt(100 * Math.max(...trunc), 1)}% no teto de 5 mm` : '') +
+    (t.regioes.length ? '' : ' · sem parcelas DKT: só as médias por hemisfério')
+  $('surf-panel').hidden = false
 }
 
 // ---------- pipeline completo recon-all-clinical (03 → 04 → 05) ----------
@@ -1550,6 +1681,7 @@ async function runReconClinical () {
   const btn = $('run-clinical')
   if (btn) btn.disabled = true
   state.clinicalChain = true
+  state.chainCancelled = false
   try {
     log('Pipeline (navegador): segmentação SynthSeg → parcelação DKT.', 'ok')
     if ($('model').value !== 'synthseg') {
@@ -1558,6 +1690,7 @@ async function runReconClinical () {
     }
     await runSegmentation()
     if (!state.seg || state.segKind !== 'synthseg') { log('Pipeline interrompido: a segmentação não concluiu.', 'err'); return }
+    if (state.chainCancelled) { log('Pipeline interrompido pelo usuário — o resultado SynthSeg permanece.', 'err'); return }
     await runDktStep()
     if (!/-dkt$/.test(state.segKind)) { log('Pipeline interrompido: a parcelação DKT não concluiu — o resultado SynthSeg permanece.', 'err'); return }
     // o passo 05 (superfícies) está em revisão e fica de fora do encadeamento
@@ -1575,10 +1708,13 @@ async function showSurfaces (on) {
   try {
     while (nv.meshes && nv.meshes.length) nv.removeMesh(nv.meshes[0])
     if (on && state.surf) {
+      const kindSel = $('surf-show-kind') ? $('surf-show-kind').value : 'pial'
       for (const m of state.surf.meshes) {
-        if (m.kind !== 'pial') continue
+        if (kindSel !== 'both' && m.kind !== kindSel) continue
         const file = new File([m.mz3], m.name + '.mz3')
         const mesh = await NVMesh.loadFromFile({ file, gl: nv.gl, name: m.name + '.mz3' })
+        // com as duas, a pial fica translúcida para deixar ver a branca por dentro
+        if (kindSel === 'both' && m.kind === 'pial') mesh.opacity = 0.35
         nv.addMesh(mesh)
       }
       // o render volumétrico oclui as malhas: esconde os volumes enquanto o 3D está ativo
@@ -1725,6 +1861,7 @@ async function runSegmentation () {
     while (state.nv.volumes.length) await state.nv.removeVolume(state.nv.volumes[0])
     await state.nv.addVolume(conformed)
     state.conformed = conformed
+    state.icv = null // o VIC é do volume conformado: nova conformação, novo VIC
     state.wl = null
     autoWindow()
     log('Conformação concluída.', 'ok')
@@ -1816,6 +1953,13 @@ function renderResults () {
   // cartões de agregados
   const cards = $('cards')
   cards.innerHTML = ''
+  if (state.icv && state.icv.vic_mm3 > 0) {
+    const div = document.createElement('div')
+    div.className = 'card'
+    div.title = (state.icv.metodo || '') + (state.icv.aviso ? '\nAtenção: ' + state.icv.aviso : '')
+    div.innerHTML = `<div class="k">Volume intracraniano (eTIV)${state.icv.aviso ? ' ⚠' : ''}</div><div class="v">${fmtVol(state.icv.vic_mm3)} <small>estimado</small></div>`
+    cards.appendChild(div)
+  }
   for (const c of s.composites) {
     const div = document.createElement('div')
     div.className = 'card'
@@ -1842,9 +1986,11 @@ function renderTable () {
   if (!s) return
   const filter = ($('filter').value || '').toLowerCase()
   const gsel = $('group-filter').value
+  const vic = state.icv && state.icv.vic_mm3 > 0 ? state.icv.vic_mm3 : null
   const thead = $('table').querySelector('thead')
   const tbody = $('table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th></tr>'
+  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th>' +
+    (vic ? '<th style="text-align:right" title="Percentual do volume intracraniano estimado (eTIV) — volume normalizado pelo tamanho da cabeça">% VIC</th>' : '') + '</tr>'
   tbody.innerHTML = ''
   let lastGroup = null
   for (const r of s.rows) {
@@ -1854,7 +2000,7 @@ function renderTable () {
     if (r.group !== lastGroup) {
       const tr = document.createElement('tr')
       tr.className = 'groupsep'
-      tr.innerHTML = `<td colspan="5">${GROUP_PT[r.group] || r.group}</td>`
+      tr.innerHTML = `<td colspan="${vic ? 6 : 5}">${GROUP_PT[r.group] || r.group}</td>`
       tbody.appendChild(tr)
       lastGroup = r.group
     }
@@ -1864,7 +2010,8 @@ function renderTable () {
       `<td>${r.hemi || '—'}</td>` +
       `<td class="num">${Math.round(r.volMm3).toLocaleString('pt-BR')}</td>` +
       `<td class="num">${r.pctBrain.toFixed(2)}</td>` +
-      `<td class="num">${r.meanInt.toFixed(1)}</td>`
+      `<td class="num">${r.meanInt.toFixed(1)}</td>` +
+      (vic ? `<td class="num">${(100 * r.volMm3 / vic).toFixed(3)}</td>` : '')
     if (r.centroid) {
       tr.title = 'Clique para centralizar a mira nesta estrutura'
       tr.onclick = () => {
@@ -1937,9 +2084,15 @@ function renderNorms () {
   const tbody = $('norm-table').querySelector('tbody')
   thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th></th></tr>'
   tbody.innerHTML = ''
-  const rows = [...n.globals, ...n.lobes]
+  const sub = n.subcorticais || []
+  const rows = [...n.globals, ...n.lobes, ...(sub.length ? [{ sep: 'Subcorticais — CentileBrain (por hemisfério)' }] : []), ...sub]
   for (const g of rows) {
     const tr = document.createElement('tr')
+    if (g.sep) {
+      tr.innerHTML = `<td colspan="5" style="color:var(--muted);font-family:var(--mono);font-size:10.5px;padding-top:8px">${g.sep}</td>`
+      tbody.appendChild(tr)
+      continue
+    }
     const flagTxt = g.flag === 'erro?' ? '⚠ erro?' : g.flag === 'atipico' ? '· atípico' : ''
     tr.innerHTML = `<td>${g.pt}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
@@ -1947,6 +2100,16 @@ function renderNorms () {
       `<td class="num">${g.z != null ? (g.z >= 0 ? '+' : '') + g.z.toFixed(2) : '—'}</td>` +
       `<td style="color:${g.flag === 'erro?' ? 'var(--accent-strong)' : 'var(--warn)'};font-family:var(--mono);font-size:10.5px">${flagTxt}</td>`
     tbody.appendChild(tr)
+  }
+  const info = n.subcorticalInfo
+  const note = $('norm-sub-note')
+  if (note) {
+    note.hidden = !info
+    if (info) {
+      note.textContent = 'Subcorticais: CentileBrain (Ge et al., Lancet Digit Health 2024; ENIGMA Lifespan), ' +
+        'GAMLSS por sexo e hemisfério, volumes FreeSurfer aseg — o SynthSeg difere sistematicamente do aseg; sem ajuste por VIC.' +
+        (info.foraDaFaixaEtaria ? ` Idade fora da faixa de treino (${info.faixaTreino.map(v => v.toFixed(0)).join('–')} anos): usada a curva da borda.` : '')
+    }
   }
 }
 
@@ -1961,12 +2124,21 @@ function metaNow () {
     age: parseFloat($('age').value) || null,
     sex: $('sex').value || null,
     norms: state.norms,
+    icv: state.icv || null,
     date: new Date().toISOString().slice(0, 10),
     input: state.inputDesc,
     quality: state.quality,
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
     qc: state.qc ? { resumo: state.qc.resumo, grupos: state.qc.grupos } : null,
+    espessura: THICK_EXPORT && state.thick
+      ? {
+          metodo: state.thick.metodo,
+          hemisferios: state.thick.hemisferios,
+          regioes: state.thick.regioes.map(r => ({ ...r, pt: ptNameOf(r.name) })),
+          qc: state.thick.qc
+        }
+      : null,
     surf: SURF_EXPORT && state.surf
       ? {
           regioes: state.surf.stats,
@@ -2303,6 +2475,7 @@ function wireInputs () {
 
   $('run').onclick = runSegmentation
   $('cancel').onclick = () => {
+    if (state.clinicalChain) state.chainCancelled = true
     if (cancelJobs()) log('Cancelando a etapa em execução — o worker foi encerrado e a memória dele liberada.', 'err')
     else if (state.running) log('Cancelamento pedido — a etapa para ao iniciar a próxima rede (o trecho atual roda na thread principal).', 'err')
   }
@@ -2310,6 +2483,7 @@ function wireInputs () {
   $('run-dkt').onclick = runDktStep
   $('run-surf').onclick = runSurfStep
   $('show-surf').onchange = () => showSurfaces($('show-surf').checked)
+  if ($('surf-show-kind')) $('surf-show-kind').onchange = () => { if ($('show-surf').checked) showSurfaces(true) }
   $('bet-f').oninput = () => { $('bet-f-out').textContent = (+$('bet-f').value).toFixed(2) }
   $('opacity').oninput = () => {
     const nv = state.nv
