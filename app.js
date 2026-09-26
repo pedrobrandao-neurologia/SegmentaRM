@@ -844,6 +844,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
     state.native = null
     state.synthsr = null
     state.bet = null
+    state.icv = null
     state.pipelineUsed = ''
   }
   state.seg = null
@@ -1307,6 +1308,7 @@ async function applySegmentationResult (labelsPath, colormapPath) {
       log('QC não calculado: ' + e.message, 'err')
       state.qc = null
     }
+    await updateIcv()
     await updateNorms()
     $('step-export').hidden = false
     updateIntermediateExports()
@@ -1475,6 +1477,9 @@ async function runSurfStep () {
     tlNote('surf', `espessura volumétrica (Laplace + reconstrução sulcal): média E ${f(h.lh && h.lh.espessura_media_mm)} · D ${f(h.rh && h.rh.espessura_media_mm)} mm`, 'info')
   } catch (e) {
     state.thick = null
+    if (e && e.cancelled) { // cancelar interrompe o passo 05, não vira "falha da espessura"
+      stepError('05 · Superfícies', e); progress(0); setBusy(false); return
+    }
     log('Espessura volumétrica não calculada: ' + e.message, 'err')
     tlNote('surf', 'espessura volumétrica falhou: ' + e.message, 'warn')
   }
@@ -1574,6 +1579,57 @@ async function runSurfStep () {
 }
 
 // espessura cortical volumétrica em worker próprio (lib/thickness.js)
+// ---------- volume intracraniano estimado (VIC ≈ eTIV) ----------
+// registro afim do T1 conformado (cabeça inteira, antes de qualquer extração cerebral) ao
+// MNI152 2009c embutido em lib/icv.js; VIC = K × det(A) na escala do eTIV do FreeSurfer.
+// Calculado uma vez por conformação (não depende dos rótulos; a segmentação só valida).
+function runIcvWorker () {
+  return new Promise((resolve, reject) => {
+    const w = new Worker('./workers/icv.worker.js', { type: 'module' })
+    const release = trackWorker(w, reject)
+    w.onmessage = (ev) => {
+      const m = ev.data
+      if (m.cmd === 'progress') { progress(0.95 + (m.frac || 0) * 0.04) }
+      else if (m.cmd === 'done') { release(); resolve(m) }
+      else if (m.cmd === 'error') { release(); reject(new Error(m.message)) }
+    }
+    w.onerror = (e) => { release(); reject(new Error(e.message || 'falha no worker do VIC')) }
+    const src = state.conformed.img
+    const img = src instanceof Uint8Array ? new Uint8Array(src) : Uint8Array.from(src, v => Math.max(0, Math.min(255, Math.round(v))))
+    const seg = state.seg ? new Uint8Array(state.seg) : null
+    w.postMessage({
+      img, dims: dimsOf(state.conformed), affine: affineOf(state.conformed).flat(), seg, labels: state.labelsMap
+    }, seg ? [img.buffer, seg.buffer] : [img.buffer])
+  })
+}
+
+async function updateIcv () {
+  if (state.icv || !state.conformed) return
+  if (state.synthsr) {
+    log('VIC não estimado: o SynthSR gera um T1 sintético sem crânio — o registro ao template precisa da cabeça inteira.')
+    return
+  }
+  try {
+    log('Estimando o volume intracraniano (eTIV: registro afim ao MNI152)…')
+    await yieldUI()
+    const r = await runIcvWorker()
+    state.icv = { vic_mm3: r.vic_mm3, metodo: r.metodo, aviso: r.aviso, detalhes: r.detalhes }
+    const fc = r.detalhes && r.detalhes.frac_cerebral
+    log(`Volume intracraniano (eTIV): ${(r.vic_mm3 / 1000).toFixed(0)} cm³` +
+      (fc != null ? ` · fração cerebral ${fc.toFixed(2)}` : '') +
+      (r.detalhes && r.detalhes.tempo_ms ? ` (${(r.detalhes.tempo_ms / 1000).toFixed(1)} s)` : '') + '.', r.aviso ? '' : 'ok')
+    if (r.aviso) log('VIC — atenção: ' + r.aviso, 'err')
+    if (TL.current) tlNote(TL.current, `VIC (eTIV) ${(r.vic_mm3 / 1000).toFixed(0)} cm³` + (r.aviso ? ' — ' + r.aviso : ''), r.aviso ? 'warn' : 'info')
+    if (state.stats) renderResults()
+  } catch (e) {
+    state.icv = null
+    // cancelar durante o VIC encerra só ele: a segmentação já pronta permanece (e o
+    // pipeline completo para, via state.chainCancelled)
+    if (e && e.cancelled) { log('VIC cancelado — a segmentação permanece.', 'err'); return }
+    log('VIC não estimado: ' + e.message, 'err')
+  }
+}
+
 function runThicknessWorker () {
   return new Promise((resolve, reject) => {
     const w = new Worker('./workers/thickness.worker.js', { type: 'module' })
@@ -1625,6 +1681,7 @@ async function runReconClinical () {
   const btn = $('run-clinical')
   if (btn) btn.disabled = true
   state.clinicalChain = true
+  state.chainCancelled = false
   try {
     log('Pipeline (navegador): segmentação SynthSeg → parcelação DKT.', 'ok')
     if ($('model').value !== 'synthseg') {
@@ -1633,6 +1690,7 @@ async function runReconClinical () {
     }
     await runSegmentation()
     if (!state.seg || state.segKind !== 'synthseg') { log('Pipeline interrompido: a segmentação não concluiu.', 'err'); return }
+    if (state.chainCancelled) { log('Pipeline interrompido pelo usuário — o resultado SynthSeg permanece.', 'err'); return }
     await runDktStep()
     if (!/-dkt$/.test(state.segKind)) { log('Pipeline interrompido: a parcelação DKT não concluiu — o resultado SynthSeg permanece.', 'err'); return }
     // o passo 05 (superfícies) está em revisão e fica de fora do encadeamento
@@ -1803,6 +1861,7 @@ async function runSegmentation () {
     while (state.nv.volumes.length) await state.nv.removeVolume(state.nv.volumes[0])
     await state.nv.addVolume(conformed)
     state.conformed = conformed
+    state.icv = null // o VIC é do volume conformado: nova conformação, novo VIC
     state.wl = null
     autoWindow()
     log('Conformação concluída.', 'ok')
@@ -1894,6 +1953,13 @@ function renderResults () {
   // cartões de agregados
   const cards = $('cards')
   cards.innerHTML = ''
+  if (state.icv && state.icv.vic_mm3 > 0) {
+    const div = document.createElement('div')
+    div.className = 'card'
+    div.title = (state.icv.metodo || '') + (state.icv.aviso ? '\nAtenção: ' + state.icv.aviso : '')
+    div.innerHTML = `<div class="k">Volume intracraniano (eTIV)${state.icv.aviso ? ' ⚠' : ''}</div><div class="v">${fmtVol(state.icv.vic_mm3)} <small>estimado</small></div>`
+    cards.appendChild(div)
+  }
   for (const c of s.composites) {
     const div = document.createElement('div')
     div.className = 'card'
@@ -1920,9 +1986,11 @@ function renderTable () {
   if (!s) return
   const filter = ($('filter').value || '').toLowerCase()
   const gsel = $('group-filter').value
+  const vic = state.icv && state.icv.vic_mm3 > 0 ? state.icv.vic_mm3 : null
   const thead = $('table').querySelector('thead')
   const tbody = $('table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th></tr>'
+  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th>' +
+    (vic ? '<th style="text-align:right" title="Percentual do volume intracraniano estimado (eTIV) — volume normalizado pelo tamanho da cabeça">% VIC</th>' : '') + '</tr>'
   tbody.innerHTML = ''
   let lastGroup = null
   for (const r of s.rows) {
@@ -1932,7 +2000,7 @@ function renderTable () {
     if (r.group !== lastGroup) {
       const tr = document.createElement('tr')
       tr.className = 'groupsep'
-      tr.innerHTML = `<td colspan="5">${GROUP_PT[r.group] || r.group}</td>`
+      tr.innerHTML = `<td colspan="${vic ? 6 : 5}">${GROUP_PT[r.group] || r.group}</td>`
       tbody.appendChild(tr)
       lastGroup = r.group
     }
@@ -1942,7 +2010,8 @@ function renderTable () {
       `<td>${r.hemi || '—'}</td>` +
       `<td class="num">${Math.round(r.volMm3).toLocaleString('pt-BR')}</td>` +
       `<td class="num">${r.pctBrain.toFixed(2)}</td>` +
-      `<td class="num">${r.meanInt.toFixed(1)}</td>`
+      `<td class="num">${r.meanInt.toFixed(1)}</td>` +
+      (vic ? `<td class="num">${(100 * r.volMm3 / vic).toFixed(3)}</td>` : '')
     if (r.centroid) {
       tr.title = 'Clique para centralizar a mira nesta estrutura'
       tr.onclick = () => {
@@ -2055,6 +2124,7 @@ function metaNow () {
     age: parseFloat($('age').value) || null,
     sex: $('sex').value || null,
     norms: state.norms,
+    icv: state.icv || null,
     date: new Date().toISOString().slice(0, 10),
     input: state.inputDesc,
     quality: state.quality,
@@ -2405,6 +2475,7 @@ function wireInputs () {
 
   $('run').onclick = runSegmentation
   $('cancel').onclick = () => {
+    if (state.clinicalChain) state.chainCancelled = true
     if (cancelJobs()) log('Cancelando a etapa em execução — o worker foi encerrado e a memória dele liberada.', 'err')
     else if (state.running) log('Cancelamento pedido — a etapa para ao iniciar a próxima rede (o trecho atual roda na thread principal).', 'err')
   }

@@ -1,0 +1,16 @@
+Template MNI152 2009c (ICBM 2009c Nonlinear Asymmetric, MNI152NLin2009cAsym), obtido do
+TemplateFlow (https://www.templateflow.org), embutido de forma reduzida em lib/icv.js
+(T1w 2 mm recortado ao intracrânio + 6 mm, 7 bits, e máscara intracraniana) para estimar
+o volume intracraniano (eTIV) por registro afim.
+
+Referências: Fonov VS, Evans AC, McKinstry RC, Almli CR, Collins DL. Unbiased nonlinear
+average age-appropriate brain templates from birth to adulthood. NeuroImage 2009;47:S102.
+Fonov V, Evans AC, Botteron K, Almli CR, McKinstry RC, Collins DL. Unbiased average
+age-appropriate atlases for pediatric studies. NeuroImage 2011;54(1):313-327.
+
+Copyright (C) 1993-2004 Louis Collins, McConnell Brain Imaging Centre, Montreal
+Neurological Institute, McGill University. Permission to use, copy, modify, and
+distribute this software and its documentation for any purpose and without fee is hereby
+granted, provided that the above copyright notice appear in all copies. The authors and
+McGill University make no representations about the suitability of this software for any
+purpose. It is provided "as is" without express or implied warranty.

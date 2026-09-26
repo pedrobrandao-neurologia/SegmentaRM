@@ -353,6 +353,28 @@ em todas as exportações. O mapa de fidelidade da seção anterior diz exatamen
 reprodução do recon-all-clinical e o que é aproximação; o JSON/PDF registram o motor de
 SDF usado (rede SynthDist ou EDT) e o χ de Euler de cada execução.
 
+## Volume intracraniano (VIC ≈ eTIV)
+
+O SynthSeg 1.0 não rotula o líquor extracerebral, então a soma dos rótulos **não** é o
+volume intracraniano. Após a segmentação, o T1 conformado (cabeça inteira, antes de
+qualquer extração cerebral) é registrado por um **afim de 12 parâmetros** (correlação
+normalizada, Levenberg–Marquardt, 8 → 4 → 2 mm, 90 inícios, pesos de Tukey) ao template
+**MNI152 2009c** embutido em `lib/icv.js` (licença MNI/McGill, `licenses/mni152.txt`); o
+VIC é `K × det(A)` com K = 2 172 000 mm³, calibrado para a **escala do eTIV do FreeSurfer**
+(Buckner et al., *NeuroImage* 2004), o mesmo princípio do `mri_segstats --etiv`.
+
+Validação (31 adultos do OpenNeuro com recon-all): r = 0,92 com o eTIV do FreeSurfer, viés
+±1% e DP 2,5–4% com K calibrado num conjunto e testado no outro (o afim do ANTs com
+informação mútua deu r = 0,79 nos mesmos sujeitos); reescalas ×0,9/×1,1 recuperadas com
+erro < 0,2%; rotação de 15° e recorte de pescoço mudam o VIC ≤ 0,1%. ~4–5 s no navegador.
+
+O VIC aparece como cartão nos resultados, como coluna **% VIC** na tabela e sai no CSV
+(linha `vic` e coluna `pct_vic`), no JSON (`volume_intracraniano`), na planilha larga
+(`eTIV`, pronta como covariável) e na capa do PDF. Avisos automáticos: registro de baixa
+qualidade, imagem já sem crânio (o VIC fica extrapolado), FOV cortado, escala fora da
+faixa, fração cerebral implausível. Não é estimado com o SynthSR ativo (T1 sintético sem
+crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covariável.
+
 ## Comparação normativa (QC, não clínico)
 
 Informando **idade e sexo**, os volumes são comparados com as curvas populacionais dos
@@ -474,6 +496,7 @@ models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts d
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/normative/subcortical.json      centis subcorticais (CentileBrain)
+lib/icv.js · workers/icv.worker.js    volume intracraniano (eTIV) por registro afim ao MNI152
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
 tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
