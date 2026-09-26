@@ -19,6 +19,10 @@ import { scanDicomSeries, directSeriesToNifti } from './lib/dicom-scan.js'
 import { computeSegQC, qcToCSV } from './lib/segqc.js'
 
 const VERSION = '1.0.0'
+// Superfícies corticais (passo 05) em revisão: a malha gerada não está confiável, então
+// NADA do passo 05 entra nas exportações (CSV/JSON/SAV/PDF/ZIP/coorte, MZ3, norm,
+// talairach.xfm). Reative aqui quando o passo estiver validado.
+const SURF_EXPORT = false
 const $ = (id) => document.getElementById(id)
 
 // seleção de modelo → índice em inferenceModelsList (ids 1-based)
@@ -1228,8 +1232,8 @@ function updateIntermediateExports () {
   if (q('nii-synthsr')) q('nii-synthsr').disabled = !state.synthsr
   if (q('nii-mask')) q('nii-mask').disabled = !state.bet
   if (q('nii-brain')) q('nii-brain').disabled = !state.bet
-  if (q('nii-norm')) q('nii-norm').disabled = !(state.surf && state.surf.norm)
-  if (q('xfm')) q('xfm').disabled = !(state.surf && state.surf.xfm)
+  if (q('nii-norm')) { q('nii-norm').hidden = !SURF_EXPORT; q('nii-norm').disabled = !(SURF_EXPORT && state.surf && state.surf.norm) }
+  if (q('xfm')) { q('xfm').hidden = !SURF_EXPORT; q('xfm').disabled = !(SURF_EXPORT && state.surf && state.surf.xfm) }
   if (q('qc-csv')) q('qc-csv').disabled = !state.qc
   if (q('nii-conf')) q('nii-conf').disabled = !state.conformed
   if (q('nii-confmap')) q('nii-confmap').disabled = !state.segConf
@@ -1547,7 +1551,7 @@ async function runReconClinical () {
   if (btn) btn.disabled = true
   state.clinicalChain = true
   try {
-    log('Pipeline recon-all-clinical (navegador): segmentação SynthSeg → parcelação DKT → superfícies por SDF.', 'ok')
+    log('Pipeline (navegador): segmentação SynthSeg → parcelação DKT.', 'ok')
     if ($('model').value !== 'synthseg') {
       $('model').value = 'synthseg'
       log('Modelo ajustado para SynthSeg 1.0 — o recon-all-clinical segmenta com o SynthSeg (agnóstico a contraste/resolução).')
@@ -1556,8 +1560,8 @@ async function runReconClinical () {
     if (!state.seg || state.segKind !== 'synthseg') { log('Pipeline interrompido: a segmentação não concluiu.', 'err'); return }
     await runDktStep()
     if (!/-dkt$/.test(state.segKind)) { log('Pipeline interrompido: a parcelação DKT não concluiu — o resultado SynthSeg permanece.', 'err'); return }
-    await runSurfStep()
-    if (state.surf) log('Pipeline recon-all-clinical concluído: volumes, parcelação, superfícies com espessura, norm sintético e talairach.xfm prontos para exportação.', 'ok')
+    // o passo 05 (superfícies) está em revisão e fica de fora do encadeamento
+    log('Pipeline concluído até a parcelação DKT (volumes + parcelação prontos para exportação). O passo 05 (superfícies) está em revisão e não roda automaticamente.', 'ok')
   } finally {
     state.clinicalChain = false
     syncButtons()
@@ -1963,7 +1967,7 @@ function metaNow () {
     pipeline: state.pipelineUsed,
     model: state.modelUsed,
     qc: state.qc ? { resumo: state.qc.resumo, grupos: state.qc.grupos } : null,
-    surf: state.surf
+    surf: SURF_EXPORT && state.surf
       ? {
           regioes: state.surf.stats,
           motorSdf: state.surf.motor || null,
@@ -2040,11 +2044,11 @@ async function makeExports () {
     niiNative: async () => state.native ? await gzipBuffer(state.native.buf) : null,
     niiSynthsr: async () => state.synthsr ? await gzipBuffer(state.synthsr.buf) : null,
     niiNorm: async () => {
-      if (!state.surf || !state.surf.norm) return null
+      if (!SURF_EXPORT || !state.surf || !state.surf.norm) return null
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'float32', description: 'segmentarm norm sintetico recon-clinical' }, state.surf.norm)
       return await gzipBuffer(buf)
     },
-    xfm: () => state.surf && state.surf.xfm ? state.surf.xfm : null,
+    xfm: () => SURF_EXPORT && state.surf && state.surf.xfm ? state.surf.xfm : null,
     qcCsv: () => state.qc ? qcToCSV(state.qc, meta, dec) : null,
     // mapa de confiança: chave própria — antes repetia "niiConf" e sobrescrevia o
     // exportador do volume conformado (o botão "Conformado" baixava a confiança)
@@ -2144,7 +2148,7 @@ async function handleExport (kind) {
           { name: `${sub}_segmentacao.nii.gz`, data: new Uint8Array(await ex.niiSeg()) },
           { name: `${sub}_conformado.nii.gz`, data: new Uint8Array(await ex.niiConf()) }
         ]
-        if (state.surf) {
+        if (SURF_EXPORT && state.surf) {
           for (const m of state.surf.meshes) files.push({ name: `${sub}_${m.name}.mz3`, data: new Uint8Array(m.mz3) })
           if (state.surf.xfm) files.push({ name: `${sub}_talairach.xfm`, data: new TextEncoder().encode(state.surf.xfm) })
           if (state.surf.norm) files.push({ name: `${sub}_norm_sintetico.nii.gz`, data: new Uint8Array(await ex.niiNorm()) })
@@ -2338,9 +2342,128 @@ function wireInputs () {
   })
 }
 
+// ---------- layout ajustável: divisores, painel ampliado, seções recolhíveis ----------
+// As larguras ficam em --rail / --inspector no .app e são salvas no navegador (só as
+// preferências de tela — nenhum dado de exame). O NiiVue observa o tamanho do canvas e
+// se redesenha sozinho.
+const LAYOUT_KEY = 'segmentarm-layout-v1'
+function readLayout () { try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {} } catch { return {} } }
+function writeLayout (o) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(o)) } catch { /* armazenamento indisponível */ } }
+function initLayout () {
+  const app = document.querySelector('.app')
+  if (!app) return
+  const lay = readLayout()
+  const VIEW_MIN = 320 // o visualizador nunca some por arraste
+  const limits = {
+    rail: () => [200, Math.max(200, Math.min(560, window.innerWidth - VIEW_MIN - (lay.insp || 400) - 12))],
+    insp: () => [300, Math.max(300, window.innerWidth - VIEW_MIN - (lay.rail || 268) - 12)]
+  }
+  const setVar = (side, px) => app.style.setProperty(side === 'rail' ? '--rail' : '--inspector', px + 'px')
+  const apply = (side, px, save) => {
+    const [lo, hi] = limits[side]()
+    const v = Math.round(Math.min(hi, Math.max(lo, px)))
+    lay[side] = v
+    setVar(side, v)
+    if (save) writeLayout(lay)
+  }
+  if (lay.rail) apply('rail', lay.rail, false)
+  if (lay.insp) apply('insp', lay.insp, false)
+  for (const [id, side] of [['split-rail', 'rail'], ['split-insp', 'insp']]) {
+    const el = document.getElementById(id)
+    if (!el) continue
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return
+      ev.preventDefault()
+      el.setPointerCapture(ev.pointerId)
+      el.classList.add('dragging')
+      document.body.classList.add('resizing')
+      const box = app.getBoundingClientRect()
+      const move = (e) => apply(side, side === 'rail' ? e.clientX - box.left - 3 : box.right - e.clientX - 3, false)
+      const up = () => {
+        el.removeEventListener('pointermove', move)
+        el.classList.remove('dragging')
+        document.body.classList.remove('resizing')
+        writeLayout(lay)
+      }
+      el.addEventListener('pointermove', move)
+      el.addEventListener('pointerup', up, { once: true })
+      el.addEventListener('pointercancel', up, { once: true })
+    })
+    el.addEventListener('keydown', (ev) => {
+      const step = ev.shiftKey ? 64 : 16
+      const cur = lay[side] || (side === 'rail' ? 268 : 400)
+      const grow = side === 'rail' ? ev.key === 'ArrowRight' : ev.key === 'ArrowLeft'
+      const shrink = side === 'rail' ? ev.key === 'ArrowLeft' : ev.key === 'ArrowRight'
+      if (grow || shrink) { ev.preventDefault(); apply(side, cur + (grow ? step : -step), true) }
+    })
+    el.addEventListener('dblclick', () => {
+      delete lay[side]
+      app.style.removeProperty(side === 'rail' ? '--rail' : '--inspector')
+      writeLayout(lay)
+    })
+  }
+  window.addEventListener('resize', () => {
+    if (lay.rail) apply('rail', lay.rail, false)
+    if (lay.insp) apply('insp', lay.insp, false)
+  })
+
+  // painel ampliado: cobre o visualizador; Esc volta
+  const maxBtn = $('insp-max')
+  const setMax = (on) => {
+    app.classList.toggle('insp-max', on)
+    if (maxBtn) { maxBtn.setAttribute('aria-pressed', String(on)); maxBtn.textContent = on ? 'Voltar ao visualizador' : 'Ampliar painel' }
+  }
+  if (maxBtn) maxBtn.onclick = () => setMax(!app.classList.contains('insp-max'))
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && app.classList.contains('insp-max') && !document.querySelector('dialog[open]')) setMax(false)
+  })
+
+  // seções recolhíveis: clique (ou Enter/Espaço) no título; estado salvo por seção
+  const inspector = document.querySelector('.inspector')
+  const keyOf = (panel) => panel.id || (panel.querySelector(':scope > h3') || {}).textContent || ''
+  const collapsed = new Set(lay.collapsed || [])
+  const heads = () => [...inspector.querySelectorAll('.panel > h3')]
+  const setCollapsed = (panel, on, save = true) => {
+    panel.classList.toggle('collapsed', on)
+    const h = panel.querySelector(':scope > h3')
+    if (h) h.setAttribute('aria-expanded', String(!on))
+    const k = keyOf(panel).trim()
+    if (on) collapsed.add(k); else collapsed.delete(k)
+    if (save) { lay.collapsed = [...collapsed]; writeLayout(lay) }
+  }
+  for (const h of heads()) {
+    h.setAttribute('role', 'button')
+    h.setAttribute('tabindex', '0')
+    h.setAttribute('aria-expanded', 'true')
+    if (collapsed.has(keyOf(h.parentElement).trim())) setCollapsed(h.parentElement, true, false)
+  }
+  inspector.addEventListener('click', (ev) => {
+    const h = ev.target.closest('.panel > h3')
+    if (!h || ev.target.closest('button, a, select, input, label')) return
+    setCollapsed(h.parentElement, !h.parentElement.classList.contains('collapsed'))
+  })
+  inspector.addEventListener('keydown', (ev) => {
+    const h = ev.target.closest && ev.target.closest('.panel > h3')
+    if (!h || (ev.key !== 'Enter' && ev.key !== ' ')) return
+    ev.preventDefault()
+    setCollapsed(h.parentElement, !h.parentElement.classList.contains('collapsed'))
+  })
+  const colBtn = $('insp-collapse')
+  if (colBtn) {
+    colBtn.onclick = () => {
+      const all = heads().map(h => h.parentElement)
+      const anyOpen = all.some(p => !p.classList.contains('collapsed'))
+      for (const p of all) setCollapsed(p, anyOpen, false)
+      lay.collapsed = [...collapsed]; writeLayout(lay)
+      colBtn.textContent = anyOpen ? 'Abrir seções' : 'Recolher seções'
+    }
+  }
+}
+
 // ---------- arranque ----------
 async function main () {
   deviceBadge()
+  initLayout()
   await initViewer()
   armContextGuard()
   initWindowing()
