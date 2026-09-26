@@ -105,9 +105,17 @@ Keras). O pipeline reproduz o `predict_synthseg.py` oficial passo a passo
   global e por classe);
 - **volumes "soft"** (soma dos posteriores, a convenção do `--vol`) exportados em
   `volume_soft_mm3`, além da contagem de voxels;
-- a única diferença que resta é a inferência em **blocos de 128³ com sobreposição de 64**
-  (o volume inteiro não cabe na GPU de um navegador comum), com os blocos na mesma fase
-  dos max-poolings do volume inteiro.
+- a única diferença que resta é a inferência em **blocos com sobreposição de 64** sobre a
+  caixa do tecido (o volume inteiro não cabe na GPU de um navegador comum), com os blocos
+  na mesma fase dos max-poolings do volume inteiro. O tamanho do bloco é escolhido pelo
+  **limite de textura da GPU**: 128³ quando ela aceita texturas de 16384² (a maioria das
+  placas dedicadas e das integradas recentes) e 96³ quando o limite é 8192² — com 128³ a
+  maior ativação da rede não cabe nessas GPUs. Com 96³ a paridade medida no T1 cai de
+  0,998 para 0,992 de Dice médio e o número de blocos sobe (~45 contra ~12);
+- robustez na GPU: o espelhamento é feito em JavaScript (a WebGL não tem `reverse` de
+  tensor 5D), os 3 maiores posteriores são calculados na GPU (só 6 números por voxel descem
+  da placa), a perda do contexto WebGL vira erro claro em vez de espera infinita, e o
+  aplicativo encerra a etapa se a GPU ficar 8 min sem responder.
 
 **Paridade medida contra o SynthSeg 1.0 oficial** (Python/Keras, `--v1`, mesma rede),
 com a entrada exata que o aplicativo envia ao worker, comparada na grade da saída
