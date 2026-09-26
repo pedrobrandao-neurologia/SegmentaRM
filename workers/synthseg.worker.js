@@ -48,7 +48,7 @@ self.onmessage = async (ev) => {
 
     const t0 = performance.now()
     const { seg, conf, volumes, volumesUnit } = await runSynthSeg({
-      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native, crop,
+      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native, cropShape: crop,
       onProgress: (msg, frac) => ui('SynthSeg: ' + msg + '.', frac)
     })
     model.dispose()
