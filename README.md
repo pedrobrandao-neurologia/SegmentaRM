@@ -72,7 +72,7 @@ resto:
 |---|---|---|
 | Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo |
 | Recorte de pescoço | `robustfov` | perfil de área de primeiro plano (Otsu) no eixo S-I detectado pela affine; mantém 170 mm do topo |
-| Correção de viés | `N4`-like | correção homomórfica, garantida **antes** da extração cerebral |
+| Correção de viés | `N4`-like | correção homomórfica só no tecido, raio em mm, **antes** da extração cerebral — **não** aplicada antes do SynthSeg (como no oficial) |
 | Extração cerebral | `BET` | modelo de máscara em modo probabilidade, limiar **f configurável**, fechamento + maior componente + cavidades; máscara sobreposta para inspeção; a rede recebe só o cérebro |
 | Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara |
 
@@ -91,12 +91,37 @@ pelos MeshNet — compare com e sem as opções.
 A opção padrão **SynthSeg 1.0** roda a **rede original** de Billot, Iglesias e
 colaboradores ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): os
 pesos oficiais `synthseg_1.0.h5` convertidos para TensorFlow.js com
-`tools/convert_synthseg1_tfjs.py` (paridade numérica verificada — argmax concorda em
-99,99% com o Keras; float16, 27 MB). O pré-processamento segue o `predict.py` oficial
-(RAS, rescale robusto 0,5–99,5, 1 mm). **Diferenças declaradas**: inferência em blocos
-com sobreposição (stitching por recorte central), sem test-time flipping nem suavização
-de posteriors. Duas camadas ausentes no tfjs foram implementadas em
-`lib/tfjs-upsampling3d.js`.
+`tools/convert_synthseg1_tfjs.py` (float16, 27 MB; argmax concorda em 99,99% com o
+Keras). O pipeline reproduz o `predict_synthseg.py` oficial passo a passo
+(`lib/synthseg-core.js › runSynthSeg`, o mesmo código do worker e dos testes):
+
+- **entrada = o arquivo original**, como no oficial: reamostragem a 1 mm com o
+  `edit_volumes.resample_volume` (gaussiano anti-serrilhado σ = 0,25/fator, mesma grade
+  de amostragem), alinhamento RAS do `align_volume_to_ref`, percentis 0,5/99,5 do volume
+  reamostrado, padding centrado; correção de viés e reamostragem clássicas **não** são
+  aplicadas antes do SynthSeg (a rede foi treinada com viés e resolução sintéticos);
+- **média com o volume espelhado E/D** (test-time flipping com troca de rótulos),
+  suavização σ = 0,5 dos posteriores e **pós-processamento topológico** (maior componente
+  global e por classe);
+- **volumes "soft"** (soma dos posteriores, a convenção do `--vol`) exportados em
+  `volume_soft_mm3`, além da contagem de voxels;
+- a única diferença que resta é a inferência em **blocos de 128³ com sobreposição de 64**
+  (o volume inteiro não cabe na GPU de um navegador comum), com os blocos na mesma fase
+  dos max-poolings do volume inteiro.
+
+**Paridade medida contra o SynthSeg 1.0 oficial** (Python/Keras, `--v1`, mesma rede),
+com a entrada exata que o aplicativo envia ao worker, comparada na grade da saída
+oficial:
+
+| Exame | Resolução | Dice médio | Dice mínimo | Voxels idênticos | Antes desta revisão |
+|---|---|---|---|---|---|
+| T1 MPRAGE (RAS) | 0,88 mm iso | **0,998** | 0,993 | 99,97% | 0,838 |
+| FLAIR 2D clínico, oblíquo (LAS) | 0,34×0,34×3,6 mm | **0,996** | 0,988 | 99,96% | 0,843 |
+| T1 (LAS) | 0,9×0,94×0,94 mm | **0,997** | 0,990 | 99,96% | 0,887 |
+
+(A referência oficial foi gerada com `--crop` por limite de memória da máquina de teste;
+o aplicativo implementa a mesma opção e a comparação usa o mesmo recorte. Os volumes
+por estrutura ficaram a ±1,3% do oficial no T1.)
 
 ### Modelos MeshNet embarcados (brainchop, MIT)
 
