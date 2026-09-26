@@ -122,6 +122,11 @@ async function netSdfs (img, dims, affine, box, ctxE, ctxD, ctxAll, modelUrl, is
   } else await tf.setBackend('cpu')
   await tf.enableProdMode()
   await tf.ready()
+  // bloco que cabe na textura da GPU (maior ativação ≈ 72 canais em resolução cheia)
+  if (tf.getBackend() === 'webgl') {
+    const maxTex = tf.env().getNumber('WEBGL_MAX_TEXTURE_SIZE') || 4096
+    while (tile > 32 && tile ** 3 * 72 > maxTex * maxTex) tile -= 32
+  }
   post(0.06, `SynthDist: backend ${tf.getBackend()}, carregando a rede…`)
   const model = await tf.loadLayersModel(modelUrl)
   try {
