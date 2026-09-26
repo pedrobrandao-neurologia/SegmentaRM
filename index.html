@@ -116,7 +116,7 @@
       <label class="check" title="Test-time flipping do predict.py oficial: média dos posteriores com os do volume espelhado E/D (rótulos trocados). Ligado no oficial; dobra o tempo da segmentação"><input type="checkbox" id="opt-synthseg-flip" checked> SynthSeg: média com o volume espelhado E/D <span class="eq">como o oficial</span></label>
       <button class="btn primary" id="run" disabled>Segmentar</button>
       <button class="btn ghost" id="cancel" hidden title="Interrompe a etapa em execução e libera a memória do worker; o exame carregado permanece">Cancelar etapa</button>
-      <button class="btn" id="run-clinical" disabled title="Encadeia os passos 03→04→05 no fluxo do recon-all-clinical: SynthSeg → parcelação DKT (FastSurferCNN) → superfícies por SDF com espessura, norm sintético e talairach.xfm">Pipeline completo <span class="eq">recon-all-clinical</span></button>
+      <button class="btn" id="run-clinical" disabled title="Encadeia os passos 03→04: SynthSeg → parcelação DKT (FastSurferCNN). O passo 05 (superfícies) está em revisão e fica de fora.">Pipeline completo <span class="eq">SynthSeg → DKT</span></button>
       <p class="note">A primeira execução baixa o modelo; depois tudo funciona offline.</p>
     </section>
 
@@ -140,7 +140,8 @@
     </section>
 
     <section class="step" id="step-surf">
-      <h2><b>05</b> Superfícies</h2>
+      <h2><b>05</b> Superfícies <span class="badge-exp" title="A reconstrução de superfícies está em revisão: a malha pode não corresponder ao córtex. Nada deste passo entra nas exportações.">em revisão</span></h2>
+      <p class="note warn-note"><b>Experimental.</b> A malha 3D ainda não é confiável; espessura, área e demais dados deste passo <b>não entram nas exportações</b> (CSV, JSON, SAV, PDF, ZIP e coorte vão até a parcelação DKT).</p>
       <div class="field">
         <label for="surf-engine">Fonte das SDFs</label>
         <select id="surf-engine">
@@ -167,6 +168,10 @@
       ANVISA e não substitui leitura radiológica.</p>
     </section>
   </nav>
+
+  <!-- divisor arrastável: largura das etapas (duplo clique restaura) -->
+  <div class="splitter" id="split-rail" role="separator" aria-orientation="vertical" tabindex="0"
+    aria-label="Redimensionar o painel de etapas" title="Arraste para redimensionar · duplo clique restaura"></div>
 
   <!-- palco central: o visualizador é a peça principal -->
   <main class="view" id="viewer-block">
@@ -198,8 +203,19 @@
     <div class="progressbar"><i id="progress"></i></div>
   </main>
 
+  <!-- divisor arrastável: largura do painel de resultados (duplo clique restaura) -->
+  <div class="splitter" id="split-insp" role="separator" aria-orientation="vertical" tabindex="0"
+    aria-label="Redimensionar o painel de resultados" title="Arraste para redimensionar · duplo clique restaura"></div>
+
   <!-- inspetor direito: exame, resultados, exportação -->
   <aside class="inspector" aria-label="Inspetor">
+    <div class="insp-tools">
+      <button class="btn sm ghost" id="insp-max" aria-pressed="false" title="Expande o painel de resultados sobre o visualizador, com as seções lado a lado (Esc volta)">Ampliar painel</button>
+      <button class="btn sm ghost" id="insp-collapse" title="Recolhe todas as seções; clique no título de uma seção para abri-la">Recolher seções</button>
+      <span class="spacer"></span>
+      <span class="insp-hint">clique nos títulos para recolher/abrir</span>
+    </div>
+    <div class="insp-body">
     <section class="panel">
       <h3>Exame</h3>
       <h2 class="title" id="stage-title">Nenhum exame carregado</h2>
@@ -242,7 +258,7 @@
       </section>
 
       <section class="panel" id="surf-panel" hidden>
-        <h3>Superfície cortical — espessura e área</h3>
+        <h3>Superfície cortical — espessura e área <span class="badge-exp">em revisão · não exportado</span></h3>
         <div class="tablewrap" style="max-height:260px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
         <p class="note">Fluxo recon-all-clinical: superfícies colocadas nas SDFs white/pial
         (energia do artigo, λ₁/λ₂ de Dale 1999), espessura por pareamento branca↔pial
@@ -283,8 +299,8 @@
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
         <button class="btn sm" data-export="qc-csv" disabled title="QC por grupo tecidual (escore, confiança, coesão, simetria) — uma linha por exame, na forma do synthseg.qc.csv">QC .csv</button>
         <button class="btn sm" data-export="nii-confmap" disabled title="Mapa de confiança da rede (posterior máxima por voxel, 0–255)">Confiança .nii.gz</button>
-        <button class="btn sm" data-export="nii-norm" disabled title="Imagem sintética de córtex super-resolvido derivada das SDFs (norm.mgz do recon-all-clinical)">Norm sintético</button>
-        <button class="btn sm" data-export="xfm" disabled title="Transformada linear para o MNI por casamento de centros de massa (talairach.xfm)">talairach.xfm</button>
+        <button class="btn sm" data-export="nii-norm" disabled hidden title="Imagem sintética de córtex super-resolvido derivada das SDFs (norm.mgz do recon-all-clinical)">Norm sintético</button>
+        <button class="btn sm" data-export="xfm" disabled hidden title="Transformada linear para o MNI por casamento de centros de massa (talairach.xfm)">talairach.xfm</button>
         <button class="btn sm" data-export="zip">Pacote .zip</button>
         <button class="btn sm" data-export="errlog" disabled title="Registro dos erros desta máquina (contexto completo para diagnóstico e reprocessamento)">Log de erros</button>
       </div>
@@ -304,6 +320,7 @@
       </div>
       <p class="queue" id="queue">Coorte vazia.</p>
     </section>
+    </div>
   </aside>
 
   <!-- rodapé: log de uma linha (histórico no title) -->

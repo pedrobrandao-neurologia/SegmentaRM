@@ -53,10 +53,62 @@ a { color: var(--accent-strong); }
 /* ---------- grade da aplicação ---------- */
 .app {
   display: grid; height: 100vh;
-  grid-template-columns: var(--rail) minmax(0, 1fr) var(--inspector);
+  grid-template-columns: var(--rail) 6px minmax(0, 1fr) 6px var(--inspector);
   grid-template-rows: 54px minmax(0, 1fr) 32px;
-  grid-template-areas: "bar bar bar" "rail view insp" "log log log";
+  grid-template-areas: "bar bar bar bar bar" "rail s1 view s2 insp" "log log log log log";
 }
+
+/* ---------- divisores arrastáveis (larguras em --rail / --inspector, salvas no navegador) ---------- */
+.splitter { position: relative; background: var(--panel); cursor: col-resize; touch-action: none; z-index: 3; }
+#split-rail { grid-area: s1; }
+#split-insp { grid-area: s2; }
+.splitter::after {
+  content: ''; position: absolute; top: 50%; left: 2px; width: 2px; height: 44px; margin-top: -22px;
+  border-radius: 2px; background: var(--line-strong); transition: background 120ms;
+}
+.splitter:hover::after, .splitter.dragging::after, .splitter:focus-visible::after { background: var(--accent); }
+.splitter:hover, .splitter.dragging { background: var(--accent-soft); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing .view { pointer-events: none; }
+
+/* ---------- painel de resultados ampliado: cobre o visualizador, seções lado a lado ---------- */
+.insp-tools {
+  position: sticky; top: 0; z-index: 4; display: flex; gap: 6px; align-items: center;
+  padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.insp-tools .btn { white-space: nowrap; }
+.insp-hint { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.app.insp-max .inspector { grid-column: 3 / 6; z-index: 6; border-left: 1px solid var(--line-strong); }
+.app.insp-max #split-insp { visibility: hidden; }
+.insp-body { display: flex; flex-direction: column; flex: 1 0 auto; }
+@media (min-width: 1181px) {
+  /* colunas corridas (mosaico) num bloco de altura natural: as seções se equilibram
+     entre as colunas e o painel rola na vertical */
+  .app.insp-max .insp-body { display: block; column-width: 460px; column-gap: 0; column-rule: 1px solid var(--line); }
+  .app.insp-max #results { display: contents; }
+  .app.insp-max .panel { break-inside: avoid; }
+  .app.insp-max .panel.grow { min-height: 0; }
+  .app.insp-max .tablewrap { max-height: 60vh !important; }
+}
+
+/* ---------- seções recolhíveis (clique no título) ---------- */
+.inspector .panel > h3 { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.inspector .panel > h3::before {
+  content: ''; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--faint); transition: transform 120ms; flex: none;
+}
+.inspector .panel.collapsed > h3::before { transform: rotate(-90deg); }
+.inspector .panel.collapsed > h3 { margin-bottom: 0; }
+.inspector .panel.collapsed > *:not(h3) { display: none !important; }
+.inspector .panel.collapsed.grow { flex: none; min-height: 0; }
+
+/* passo em revisão */
+.badge-exp {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; vertical-align: middle;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: #F2C46D; background: rgba(242, 196, 109, 0.12); border: 1px solid rgba(242, 196, 109, 0.35);
+}
+.note.warn-note { color: #E9D6A8; }
 
 /* ---------- barra superior ---------- */
 .bar {
@@ -349,6 +401,8 @@ tr.groupsep td {
     grid-template-rows: auto auto 62vh auto auto;
     grid-template-areas: "bar" "rail" "view" "insp" "log";
   }
+  .splitter, .insp-hint, #insp-max { display: none; }
+  .app.insp-max .inspector { grid-column: auto; }
   .rail, .inspector { border: 0; border-bottom: 1px solid var(--line); max-height: none; }
   .bar { flex-wrap: wrap; height: auto; padding: 10px 14px; }
   .brand small { display: none; }
