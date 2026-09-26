@@ -842,6 +842,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.segKind = null
   state.segConf = null
   state.segVolSoft = null
+  state.segVolSoftUnit = null
   state.labelsMap = null
   state.colormap = null
   state.stats = null
@@ -1057,18 +1058,32 @@ function runWorker (url, message, pFrom, pTo) {
         // pode apagar a confiança da segmentação que ele está refinando; a limpeza
         // por execução fica no início de runSegmentation.
         if (d.conf) state.segConf = new Uint8Array(d.conf)
-        if (d.volumes) state.segVolSoft = new Float64Array(d.volumes)
+        if (d.volumes) { state.segVolSoft = new Float64Array(d.volumes); state.segVolSoftUnit = d.volumesUnit || 'voxels' }
         log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
         resolve(new Uint8Array(d.img))
       }
     }
     w.onerror = (e) => { end(); reject(new Error(e.message || 'falha no worker de segmentação')) }
-    w.postMessage(message)
+    // a imagem nativa (dezenas de MB) vai transferida, não clonada
+    w.postMessage(message, message.native && message.native.data ? [message.native.data.buffer] : [])
   })
 }
 
-function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = null) {
+function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = null, nativeVol = null) {
   const flip = !$('opt-synthseg-flip') || $('opt-synthseg-flip').checked
+  // caminho oficial: a rede vê a imagem NATIVA pré-processada como no predict_synthseg
+  // (reamostragem 1 mm, RAS, percentis do volume reamostrado); o conformado só define a
+  // grade de saída. Com extração cerebral a entrada é o cérebro conformado (sem nativa).
+  let native = null
+  if (nativeVol && !imgOverride) {
+    const d = dimsOf(nativeVol)
+    const n = d[0] * d[1] * d[2]
+    const slope = nativeVol.hdr.scl_slope || 1
+    const inter = nativeVol.hdr.scl_inter || 0
+    const data = new Float32Array(n)
+    for (let i = 0; i < n; i++) data[i] = nativeVol.img[i] * slope + inter
+    native = { data, dims: d, affine: affineOf(nativeVol) }
+  }
   log(`SynthSeg 1.0 — ${isGPU ? 'WebGL' : 'CPU'}, blocos de ${tile}³${flip ? ', média com o volume espelhado E/D (como o predict.py oficial)' : ', sem espelhamento'}…`)
   return runWorker('./workers/synthseg.worker.js', {
     modelUrl: new URL('./models/synthseg1/model.json', location.href).href, // o worker resolve URLs relativas contra /workers/
@@ -1078,7 +1093,8 @@ function runSynthsegModel (conformed, isGPU, tile, pFrom, pTo, imgOverride = nul
     isGPU,
     tile,
     overlap: 32,
-    flip
+    flip,
+    native
   }, pFrom, pTo)
 }
 
@@ -1231,7 +1247,7 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     // SynthSeg: volume soft por estrutura (soma dos posteriors), a convenção do --vol
     // oficial; só vale para a segmentação da própria rede (o DKT troca os rótulos)
     if (state.segKind === 'synthseg' && state.segVolSoft) {
-      const vv = state.stats.voxVol || voxVolOf(state.conformed)
+      const vv = state.segVolSoftUnit === 'mm3' ? 1 : (state.stats.voxVol || voxVolOf(state.conformed))
       for (const r of state.stats.rows) {
         if (r.index > 0 && r.index < state.segVolSoft.length) r.volSoftMm3 = state.segVolSoft[r.index] * vv
       }
@@ -1718,7 +1734,7 @@ async function runSegmentation () {
     if (MODEL_MAP[kind].synth) {
       state.modelUsed = MODEL_MAP[kind].pt + (variant === 'low' ? ' · blocos menores' : '')
       log(`Segmentando com ${state.modelUsed}…`)
-      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg)
+      seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg, workVol)
       labelsPath = './models/synthseg1/labels.json'
       colormapPath = './models/synthseg1/colormap.json'
     } else {

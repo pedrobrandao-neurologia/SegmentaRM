@@ -2,10 +2,14 @@
 // convertida para TensorFlow.js). Recebe o volume conformado 256³ · 1 mm e devolve
 // o mapa de rótulos (índice do canal, 0–31) na mesma ordem de voxels.
 // Mensagem: { modelUrl, img (Uint8Array | Float32Array…), dims, affine, isGPU, tile, overlap,
-//             flip = true, sigma = 0.5, postprocess = true }
+//             flip = true, sigma = 0.5, postprocess = true,
+//             native?: { data: Float32Array, dims, affine 4×4 } }
+// Com `native`, a rede vê a imagem nativa pré-processada exatamente como no
+// predict_synthseg.preprocess oficial (reamostragem 1 mm, RAS, percentis e padding
+// dela) e a saída é amostrada na grade de `dims/affine` (o conformado); volumes em mm³.
 // Resposta: { cmd:'img', img: Uint8Array (canal 0–31), conf: Uint8Array (posterior
-//             máxima 0–255), volumes: Float64Array (volume "soft" por canal, em voxels —
-//             mm³ na grade de 1 mm; equivalente ao --vol do oficial) }
+//             máxima 0–255), volumes: Float64Array (volume "soft" por canal — equivalente
+//             ao --vol do oficial), volumesUnit: 'mm3' (caminho nativo) | 'voxels' }
 // O pipeline (pré-processamento, blocos, TTA, suavização, pós-processamento) está em
 // lib/synthseg-core.js › runSynthSeg, o mesmo código exercitado pelos testes em Node.
 
@@ -20,7 +24,7 @@ function ui (message, progressFrac = -1, modalMessage = '') {
 self.onmessage = async (ev) => {
   const {
     modelUrl, img, dims, affine, isGPU = true, tile = 128, overlap = 32,
-    flip = true, sigma = 0.5, postprocess = true
+    flip = true, sigma = 0.5, postprocess = true, native = null
   } = ev.data
   try {
     registerUpSampling3D(tf)
@@ -43,13 +47,13 @@ self.onmessage = async (ev) => {
     ui('SynthSeg: rede carregada (UNet 5 níveis, 32 estruturas).', 0.06)
 
     const t0 = performance.now()
-    const { seg, conf, volumes } = await runSynthSeg({
-      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess,
+    const { seg, conf, volumes, volumesUnit } = await runSynthSeg({
+      tf, model, img, dims, affine, tile, overlap, flip, sigma, postprocess, native,
       onProgress: (msg, frac) => ui('SynthSeg: ' + msg + '.', frac)
     })
     model.dispose()
     ui(`SynthSeg: inferência concluída em ${((performance.now() - t0) / 1000).toFixed(0)} s.`, 0.97)
-    self.postMessage({ cmd: 'img', img: seg, conf, volumes }, [seg.buffer, conf.buffer, volumes.buffer])
+    self.postMessage({ cmd: 'img', img: seg, conf, volumes, volumesUnit }, [seg.buffer, conf.buffer, volumes.buffer])
   } catch (e) {
     const msg = String((e && e.message) || e)
     const oom = /memory|alloc|texture|context lost|OOM/i.test(msg)
