@@ -72,7 +72,7 @@ resto:
 |---|---|---|
 | Reorientação RAS | `fslreorient2std` | permutação/flip de eixos pela affine, **sem reamostrar**, no espaço nativo |
 | Recorte de pescoço | `robustfov` | perfil de área de primeiro plano (Otsu) no eixo S-I detectado pela affine; mantém 170 mm do topo |
-| Correção de viés | `N4`-like | correção homomórfica, garantida **antes** da extração cerebral |
+| Correção de viés | `N4`-like | correção homomórfica só no tecido, raio em mm, **antes** da extração cerebral — **não** aplicada antes do SynthSeg (como no oficial) |
 | Extração cerebral | `BET` | modelo de máscara em modo probabilidade, limiar **f configurável**, fechamento + maior componente + cavidades; máscara sobreposta para inspeção; a rede recebe só o cérebro |
 | Contraste SC/SB | efeito do `FAST -B` | normalização opcional [p2,p98]→[0,255] dentro da máscara |
 
@@ -91,12 +91,37 @@ pelos MeshNet — compare com e sem as opções.
 A opção padrão **SynthSeg 1.0** roda a **rede original** de Billot, Iglesias e
 colaboradores ([BBillot/SynthSeg](https://github.com/BBillot/SynthSeg), Apache 2.0): os
 pesos oficiais `synthseg_1.0.h5` convertidos para TensorFlow.js com
-`tools/convert_synthseg1_tfjs.py` (paridade numérica verificada — argmax concorda em
-99,99% com o Keras; float16, 27 MB). O pré-processamento segue o `predict.py` oficial
-(RAS, rescale robusto 0,5–99,5, 1 mm). **Diferenças declaradas**: inferência em blocos
-com sobreposição (stitching por recorte central), sem test-time flipping nem suavização
-de posteriors. Duas camadas ausentes no tfjs foram implementadas em
-`lib/tfjs-upsampling3d.js`.
+`tools/convert_synthseg1_tfjs.py` (float16, 27 MB; argmax concorda em 99,99% com o
+Keras). O pipeline reproduz o `predict_synthseg.py` oficial passo a passo
+(`lib/synthseg-core.js › runSynthSeg`, o mesmo código do worker e dos testes):
+
+- **entrada = o arquivo original**, como no oficial: reamostragem a 1 mm com o
+  `edit_volumes.resample_volume` (gaussiano anti-serrilhado σ = 0,25/fator, mesma grade
+  de amostragem), alinhamento RAS do `align_volume_to_ref`, percentis 0,5/99,5 do volume
+  reamostrado, padding centrado; correção de viés e reamostragem clássicas **não** são
+  aplicadas antes do SynthSeg (a rede foi treinada com viés e resolução sintéticos);
+- **média com o volume espelhado E/D** (test-time flipping com troca de rótulos),
+  suavização σ = 0,5 dos posteriores e **pós-processamento topológico** (maior componente
+  global e por classe);
+- **volumes "soft"** (soma dos posteriores, a convenção do `--vol`) exportados em
+  `volume_soft_mm3`, além da contagem de voxels;
+- a única diferença que resta é a inferência em **blocos de 128³ com sobreposição de 64**
+  (o volume inteiro não cabe na GPU de um navegador comum), com os blocos na mesma fase
+  dos max-poolings do volume inteiro.
+
+**Paridade medida contra o SynthSeg 1.0 oficial** (Python/Keras, `--v1`, mesma rede),
+com a entrada exata que o aplicativo envia ao worker, comparada na grade da saída
+oficial:
+
+| Exame | Resolução | Dice médio | Dice mínimo | Voxels idênticos | Antes desta revisão |
+|---|---|---|---|---|---|
+| T1 MPRAGE (RAS) | 0,88 mm iso | **0,998** | 0,993 | 99,97% | 0,838 |
+| FLAIR 2D clínico, oblíquo (LAS) | 0,34×0,34×3,6 mm | **0,996** | 0,988 | 99,96% | 0,843 |
+| T1 (LAS) | 0,9×0,94×0,94 mm | **0,997** | 0,990 | 99,96% | 0,887 |
+
+(A referência oficial foi gerada com `--crop` por limite de memória da máquina de teste;
+o aplicativo implementa a mesma opção e a comparação usa o mesmo recorte. Os volumes
+por estrutura ficaram a ±1,3% do oficial no T1.)
 
 ### Modelos MeshNet embarcados (brainchop, MIT)
 
@@ -152,16 +177,40 @@ segmentação permanece intacta. A fusão replica o `--parc` do SynthSeg 2.0
 
 A **fonte recomendada** é a **FastSurferCNN**
 ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et
-al., *NeuroImage* 2020): os **checkpoints oficiais v1** (axial/coronal/sagital)
-convertidos para tfjs float16 com BatchNorm dobrada (`tools/convert_fastsurfer_tfjs.py`,
-3,6 MB por vista; paridade de argmax 99,98% com a referência em fatias reais). É a rede
-volumétrica cujo `aparc.DKTatlas+aseg` o recon-surf refina — a inferência replica o
-pipeline v1 (fatias espessas de 7 cortes, agregação 0,4·axial + 0,4·coronal +
-0,2·sagital em logits), **restrita à fita cortical** (por isso cabe na memória do
-navegador); as regiões que a v1 não lateraliza são atribuídas por componente conexo
-contra a linha média. Há a opção **axial+coronal** (mais rápida) e a rede DKT do
-brainchop como alternativa. Estruturas ausentes num sujeito são aceitas — contagem menor
-de rótulos é aviso, não erro.
+al., *NeuroImage* 2020): os **checkpoints oficiais v1** (axial/coronal/sagital —
+`Epoch_30_training_state.pkl` do commit `e215b839`, os mesmos das tags v1.0.0–v1.1.2)
+convertidos para tfjs **float32** (`tools/convert_fastsurfer_tfjs.py`, 7,2 MB por vista).
+As BatchNorm que seguem uma convolução são dobradas nela (exato); a **bn0 da entrada fica
+explícita**, aplicada antes do zero-padding da primeira convolução como no PyTorch —
+dobrá-la não é exato na borda e o erro se propaga pela U-Net. É a rede volumétrica cujo
+`aparc.DKTatlas+aseg` o recon-surf refina — a inferência replica o pipeline v1 (fatias
+espessas de 7 cortes com borda replicada, entrada/255, agregação 0,4·axial + 0,4·coronal +
+0,2·sagital em logits, mapeamento sagital 51→79 classes), **restrita à fita cortical**:
+o acumulador guarda só os voxels da máscara (Int16, ~0,1 GB), nunca o volume
+256³ × 79 × float32 (5,3 GB) do pipeline oficial. Dentro da máscara o argmax é tomado
+entre as classes corticais (o "argmax sem fundo" do `--parc`).
+
+**Paridade medida** (logits da rede portada × referência numpy do FastSurferCNN com as BN
+não dobradas, lidas dos `.pkl`; argmax nos voxels de tecido de fatias 256² reais):
+contra a referência em **float32** (a precisão em que o PyTorch roda) — coronal
+**99,99%**, axial **100%**, sagital **99,99%**, o mesmo ruído que separa duas
+implementações float32; contra float64 — 99,90% / 100% / 99,995% (a vista coronal é a
+mais sensível ao arredondamento float32). WebGL (Chromium) e CPU dão o mesmo argmax. Para
+registro, o formato anterior (float16 com a bn0 dobrada) ficava em 99,50% / 97,98% /
+99,39%, e o unpool por `scatterND` não terminava na WebGL.
+
+**Lateralização.** A rede v1 usa uma única classe para os dois lados em várias regiões
+corticais. Com a fonte **SynthSeg**, o hemisfério é o do SynthSeg (a rede só nomeia a
+parcela). Com a **aseg compacta** (córtex bilateral), segue-se o `eval.py` v1: as 19
+classes da lista oficial (inclui precuneus e superiorfrontal) são trocadas para o lado
+direito por componente 26-conexo mais próximo do hemisfério direito, e as 4 que cruzam a
+fissura (lateraloccipital, parsorbitalis, rostralanteriorcingulate, superiorparietal)
+voxel a voxel. **Adaptação declarada:** o oficial mede a proximidade contra a substância
+branca E/D (maior componente; divisão voxel a voxel pela SB suavizada, σ = 3 mm); aqui só a
+fita cortical é inferida, então os centroides dos hemisférios vêm das parcelas que a rede
+já lateraliza e a divisão voxel a voxel usa o plano bissetor entre eles. Há a opção
+**axial+coronal** (mais rápida) e a rede DKT do brainchop como alternativa. Estruturas
+ausentes num sujeito são aceitas — contagem menor de rótulos é aviso, não erro.
 
 ## O pipeline recon-all-clinical no navegador — mapa de fidelidade
 
@@ -301,6 +350,16 @@ parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 vira aler
 erro de segmentação** no painel e no PDF. As normas foram ajustadas em volumes FreeSurfer;
 os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clínico.
 
+**DKT × normas DK.** As normas regionais dos brain charts são do atlas **DK**; o protocolo
+**DKT** (Klein & Tourville, *Front Neurosci* 2012) eliminou bankssts, frontalpole e
+temporalpole, cujo tecido foi absorvido pelas regiões adjacentes sem partilha definida.
+Com parcelação DKT, as parcelas DK adjacentes a elas (temporal superior, médio e
+inferior, entorrinal, parietal inferior, supramarginal, frontal superior, frontal médio
+rostral, orbitofrontais medial e lateral) saem **sem z** ("sem norma comparável"), em vez
+de um z inflado; nos **lobos**, as normas das regiões eliminadas são somadas ao lobo que
+as absorveu (temporal: bankssts + temporalpole; frontal: frontalpole), e aí a comparação
+continua válida.
+
 ## Exportações
 
 - **CSV** longo (estrutura/agregado/lobo/assimetria/superfície; decimal configurável)
@@ -374,7 +433,7 @@ models/synthseg1/                      SynthSeg 1.0 em tfjs f16 (27 MB) + rótul
 models/synthsr/                        SynthSR v1.0 em tfjs f16 (26 MB) + fixture de paridade
 models/synthsurf/                      SynthDist em tfjs f16 (26,5 MB) + fixture de paridade
 models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts de redução
-models/fastsurfer/                     FastSurferCNN v1 f16 (3×3,6 MB) + manifesto
+models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)

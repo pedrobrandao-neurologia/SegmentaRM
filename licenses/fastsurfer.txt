@@ -5,11 +5,18 @@ Neurodegenerative Diseases (DZNE), Bonn — https://github.com/Deep-MI/FastSurfe
 Licença: Apache License 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
 
 Os arquivos .bin são os checkpoints oficiais do FastSurferCNN v1
-(Epoch_30_training_state.pkl, vistas axial/coronal/sagital) convertidos para
-float16 com as BatchNorm dobradas nas convoluções (transformação exata em modo
-de avaliação) por tools/convert_fastsurfer_tfjs.py. Obtidos do espelho público
-FNNDSC/pl-fastsurfer_inference (plugin ChRIS, que os redistribuía sob a mesma
-licença), commit e239f044.
+(checkpoints/{Axial,Coronal,Sagittal}_Weights_FastSurferCNN/ckpts/
+Epoch_30_training_state.pkl), enviados ao Deep-MI/FastSurfer no commit e215b839
+(24/06/2020) e inalterados das tags v1.0.0 a v1.1.2, convertidos em FLOAT32 por
+tools/convert_fastsurfer_tfjs.py. As BatchNorm que seguem uma convolução são
+dobradas nela (exato em modo de avaliação, dobra calculada em float64); a
+BatchNorm de ENTRADA (bn0) é exportada explicitamente (encode1.bn0_s/_t) e
+aplicada antes do zero-padding da primeira convolução, exatamente como no grafo
+do PyTorch — dobrá-la na conv0 não é exato na borda. Paridade do argmax no tecido
+contra uma referência numpy float32 com as BatchNorm não dobradas: coronal
+99,989%, axial 100%, sagital 99,990% (fatias 256² reais). Os mesmos pesos
+circulavam no espelho FNNDSC/pl-fastsurfer_inference (commit e239f044), de onde a
+primeira versão foi obtida; a reconversão a partir do Deep-MI saiu idêntica.
 
 Citação:
   Henschel L, Conjeti S, Estrada S, Diers K, Fischl B, Reuter M.

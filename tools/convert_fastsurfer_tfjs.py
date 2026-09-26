@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """Converte os checkpoints FastSurferCNN v1 (Epoch_30_training_state.pkl, torch legacy)
-para o formato binário do SegmentaRM: models/fastsurfer/{vista}.bin (float16) + manifest.
+para o formato binário do SegmentaRM: models/fastsurfer/{vista}.bin (float32) + manifest.
 
 A rede (Henschel et al., NeuroImage 2020; Deep-MI/FastSurfer, Apache 2.0) é a CNN
 volumétrica 2.5D usada pelo FastSurfer para gerar o aparc.DKTatlas+aseg — a fonte da
-parcelação que o recon-surf depois refina em superfícies. Aqui todas as BatchNorm são
-DOBRADAS nas convoluções vizinhas (exato em modo eval):
-  conv→bn:  w' = w·γ/σ ; b' = (b−μ)·γ/σ + β        (bn1, bn2, bn3 após conv0/1/2)
-  bn→conv:  w'[o,i] = w[o,i]·s[i] ; b' = b + Σ w·t   (bn0 de entrada, s=γ/σ, t=β−μ·γ/σ)
-O grafo restante fica: conv + PReLU escalar + maxout + maxpool(índices)/unpool.
+parcelação que o recon-surf depois refina em superfícies. Checkpoints oficiais:
+checkpoints/{Axial,Coronal,Sagittal}_Weights_FastSurferCNN/ckpts/Epoch_30_training_state.pkl
+do commit e215b839 (inalterados nas tags v1.0.0–v1.1.2).
+
+BatchNorm em modo eval:
+  conv→bn (bn1, bn2, bn3 após conv0/1/2) é DOBRADA na conv — exata em todo o plano:
+      w' = w·γ/σ ; b' = (b−μ)·γ/σ + β
+  bn0 (na ENTRADA, antes da conv0) NÃO é dobrada: dobrá-la não é exato na borda (o
+  zero-padding da conv0 acontece depois da bn0 no PyTorch, e o erro de 2 px se propaga
+  pelo campo receptivo da U-Net: até ~2% de argmax divergente no tecido em float16).
+  Ela sai como 'encode1.bn0_s' e 'encode1.bn0_t' (y = s·x + t por canal), aplicada no
+  navegador antes da conv0 com zero-padding — o grafo do PyTorch, sem aproximação.
+Pesos em float32 (≈7,2 MB por vista): o float16 custava ~0,1–0,3% de argmax no tecido.
+O grafo restante fica: conv + PReLU escalar + maxout + maxpool/unpool.
 
 Uso: python3 tools/convert_fastsurfer_tfjs.py <dir com fastsurfercnn_{axial,coronal,sagittal}_epoch30.pkl>
 Sem o torch instalado — o leitor do formato legacy está embutido.
@@ -98,11 +107,19 @@ def fold_bn_conv(bn_g, bn_b, bn_m, bn_v, w, b):
     return w2, b2
 
 
-def fold_block(sd, pre, is_input):
-    """Devolve [(w,b) conv0, conv1, conv2, alpha] com as BNs dobradas."""
+def bn_affine(g, b, m, v):
+    """BatchNorm em eval como afim por canal: y = s·x + t."""
+    s = g / np.sqrt(v + EPS)
+    return s, b - m * s
+
+
+def fold_block(sd, pre, is_input, fold_bn0=False):
+    """Devolve [(w,b) conv0, conv1, conv2, alpha] com as BNs pós-conv dobradas.
+    A bn0 do bloco de entrada só é dobrada com fold_bn0=True (formato antigo, inexato
+    na borda); por padrão ela é exportada à parte (ver export_view)."""
     g = lambda n: sd[f'{pre}.{n}']
     w0, b0 = g('conv0.weight'), g('conv0.bias')
-    if is_input:  # bn0 antes de conv0
+    if is_input and fold_bn0:  # bn0 antes de conv0
         w0, b0 = fold_bn_conv(g('bn0.weight'), g('bn0.bias'), g('bn0.running_mean'), g('bn0.running_var'), w0, b0)
     w0, b0 = fold_conv_bn(w0, b0, g('bn1.weight'), g('bn1.bias'), g('bn1.running_mean'), g('bn1.running_var'))
     w1, b1 = fold_conv_bn(g('conv1.weight'), g('conv1.bias'),
@@ -117,10 +134,16 @@ def export_view(sd, out_bin):
     blobs = []
 
     def put(name, arr):
-        arr = np.ascontiguousarray(arr, dtype=np.float32)
+        # dobra em float64 e grava em float32
+        arr = np.ascontiguousarray(np.asarray(arr, dtype=np.float64).astype(np.float32))
         order.append({'name': name, 'shape': list(arr.shape)})
-        blobs.append(arr.astype(np.float16))
+        blobs.append(arr)
 
+    # bn0 da entrada, explícita (aplicada antes do zero-padding da conv0)
+    s0, t0 = bn_affine(*(sd[f'encode1.bn0.{k}'].astype(np.float64)
+                         for k in ('weight', 'bias', 'running_mean', 'running_var')))
+    put('encode1.bn0_s', s0)
+    put('encode1.bn0_t', t0)
     for pre in ('encode1', 'encode2', 'encode3', 'encode4', 'bottleneck',
                 'decode4', 'decode3', 'decode2', 'decode1'):
         w0, b0, w1, b1, w2, b2, alpha = fold_block(sd, pre, pre == 'encode1')
@@ -173,7 +196,7 @@ def main():
     src = Path(sys.argv[1] if len(sys.argv) > 1 else '.')
     out = Path(__file__).resolve().parent.parent / 'models' / 'fastsurfer'
     out.mkdir(parents=True, exist_ok=True)
-    manifest = {'format': 'segmentarm-fastsurfercnn-v1', 'dtype': 'float16', 'numFilters': 64,
+    manifest = {'format': 'segmentarm-fastsurfercnn-v1', 'dtype': 'float32', 'bn0': 'explicit', 'numFilters': 64,
                 'kernel': 5, 'thickness': 7, 'views': {}, 'lut79': LUT79, 'sag2full': SAG2FULL,
                 'license': 'Apache-2.0 (Deep-MI/FastSurfer); Henschel et al., NeuroImage 2020'}
     # parcela DKT (nome) → índice no espaço do modelo 104 do brainchop (1..34 = ordem DK)
@@ -202,11 +225,12 @@ def main():
     for view, ckpt in (('coronal', 'fastsurfercnn_coronal_epoch30.pkl'),
                        ('axial', 'fastsurfercnn_axial_epoch30.pkl'),
                        ('sagittal', 'fastsurfercnn_sagittal_epoch30.pkl')):
-        sd = load_state_dict(src / ckpt)
+        # dobras em float64 (gravadas em float32)
+        sd = {k: (v.astype(np.float64) if v.dtype.kind == 'f' else v) for k, v in load_state_dict(src / ckpt).items()}
         order, total = export_view(sd, out / f'{view}.bin')
         manifest['views'][view] = {'bin': f'{view}.bin', 'classes': int(sd['classifier.conv.weight'].shape[0]),
                                    'tensors': order, 'totalValues': total}
-        print(f'{view}: {total * 2 / 1e6:.1f} MB f16, {manifest["views"][view]["classes"]} classes')
+        print(f'{view}: {total * 4 / 1e6:.1f} MB f32, {manifest["views"][view]["classes"]} classes')
     (out / 'manifest.json').write_text(json.dumps(manifest))
     print('manifest salvo em', out / 'manifest.json')
 

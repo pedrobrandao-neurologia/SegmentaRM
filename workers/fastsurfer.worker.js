@@ -15,23 +15,39 @@ function ui (message, progressFrac = -1, modalMessage = '') {
 self.onmessage = async (ev) => {
   const { baseUrl, img, dims, affine, mask, isGPU = true, views = ['coronal', 'axial', 'sagittal'], batch = 2 } = ev.data
   try {
+    // tf.setBackend devolve Promise<boolean> (false quando o backend não inicializa,
+    // p.ex. sem WebGL no worker) em vez de lançar — checar o retorno
+    let fellBack = false
     if (isGPU && typeof OffscreenCanvas !== 'undefined') {
-      try { await tf.setBackend('webgl') } catch { await tf.setBackend('cpu') }
+      if (!(await tf.setBackend('webgl').catch(() => false))) {
+        fellBack = true
+        await tf.setBackend('cpu')
+      }
     } else {
+      if (isGPU) fellBack = true
       await tf.setBackend('cpu')
     }
     await tf.enableProdMode()
     await tf.ready()
-    ui(`FastSurfer: backend ${tf.getBackend()}, baixando a rede…`, 0.01)
+    const backend = tf.getBackend()
+    ui(`FastSurfer: backend ${backend === 'webgl' ? 'WebGL (GPU)' : 'CPU'}` +
+      (fellBack ? ' — a GPU/WebGL não inicializou neste navegador; em CPU a parcelação leva horas' : '') +
+      ', baixando a rede…', 0.01)
     const abs = (p) => new URL(p, baseUrl).href
-    const manifest = await (await fetch(abs('models/fastsurfer/manifest.json'))).json()
+    const get = async (p) => {
+      const r = await fetch(abs(p))
+      if (!r.ok) throw new Error(`falha ao baixar ${p} (HTTP ${r.status})`)
+      return r
+    }
+    const manifest = await (await get('models/fastsurfer/manifest.json')).json()
     const bins = {}
     for (const v of views) {
-      bins[v] = await (await fetch(abs('models/fastsurfer/' + manifest.views[v].bin))).arrayBuffer()
+      if (!manifest.views[v]) throw new Error(`vista desconhecida: ${v}`)
+      bins[v] = await (await get('models/fastsurfer/' + manifest.views[v].bin)).arrayBuffer()
     }
     ui('FastSurfer: reorientando para LIA e preparando as fatias…', 0.03)
     const liaImg = toLIA(new Uint8Array(img), dims, affine)
-    const liaMask = toLIA(new Uint8Array(mask), dims, affine)
+    const liaMask = toLIA(new Uint8Array(mask), dims, affine, false)
     const { parcLia, stats } = await runFastSurferParc({
       tf,
       manifest,
@@ -41,7 +57,7 @@ self.onmessage = async (ev) => {
       maskLia: liaMask.img,
       views,
       batch,
-      onProgress: (f, txt) => ui(txt, 0.04 + f * 0.94)
+      onProgress: (f, txt) => ui(`${txt} [${backend}]`, 0.04 + f * 0.94)
     })
     // volta para a ordem de voxels de origem
     const out = new Uint8Array(parcLia.length)
@@ -49,7 +65,8 @@ self.onmessage = async (ev) => {
     for (let p = 0; p < parcLia.length; p++) {
       if (parcLia[p]) out[back[p]] = parcLia[p]
     }
-    ui(`FastSurfer: ${stats.ctxVox.toLocaleString()} voxels parcelados em ${stats.slices} fatias (${stats.views.join('+')}).`, 0.99)
+    ui(`FastSurfer (${backend === 'webgl' ? 'WebGL' : 'CPU'}): ${stats.ctxVox.toLocaleString('pt-BR')} voxels parcelados em ${stats.slices} fatias (${stats.views.join('+')}) — ` +
+      `${stats.netCortexVox.toLocaleString('pt-BR')} já eram córtex no argmax irrestrito da rede.`, 0.99)
     self.postMessage({ cmd: 'img', img: out, stats }, [out.buffer])
   } catch (e) {
     ui('', -1, 'FastSurfer: ' + (e && e.message ? e.message : String(e)))
