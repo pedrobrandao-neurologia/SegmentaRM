@@ -240,14 +240,14 @@
     </section>
 
     <section class="panel" id="qc-panel" hidden>
-      <h3>QC da segmentação — por grupo tecidual</h3>
+      <h3>Índice de confiança interno (não validado) — por grupo tecidual</h3>
       <div class="tablewrap" style="max-height:250px"><table id="qc-table"><thead></thead><tbody></tbody></table></div>
       <p class="qc-sum" id="qc-summary"></p>
-      <p class="note">Escore = <b>confiança</b> (posterior máxima da rede) × <b>coesão</b> (fração no
+      <p class="note"><b>Índice interno, não validado</b> = <b>confiança</b> (posterior máxima da rede) × <b>coesão</b> (fração no
       maior componente conexo) × <b>simetria</b> (excesso de assimetria E/D). Grupos teciduais e
-      nomes são os do regressor de QC do <b>SynthSeg 2.0</b>, mas o escore é próprio — <b>não</b> é o
-      Dice predito daquele regressor. Calibre o corte na sua coorte; 0,65 é o do artigo, como
-      referência de partida.</p>
+      nomes são os do regressor de QC do <b>SynthSeg 2.0</b>, mas este índice é próprio — <b>não</b> é o
+      Dice predito daquele regressor, e o corte 0,65 foi calibrado para o regressor real: aqui é só
+      referência de partida. Calibre um corte próprio em teste-reteste.</p>
     </section>
 
     <div id="results" hidden>
@@ -278,11 +278,20 @@
         para visualização.</p>
       </section>
 
+      <section class="panel" id="alertas-panel" hidden>
+        <h3>Alertas de QC</h3>
+        <ul class="alertas" id="alertas-list"></ul>
+        <p class="note">Regras declarativas (models/qc_rules.json): limiares <b>provisórios</b> até a calibração em
+        teste-reteste e em controles do sítio. Quando alguma regra pede, o PDF traz cortes automáticos
+        pelas estruturas envolvidas para a inspeção visual.</p>
+      </section>
+
       <section class="panel" id="norm-panel" hidden>
         <h3>Normativo — idade e sexo</h3>
+        <label class="check" id="recentragem-wrap" hidden title="Desconta do z o desvio que controles saudáveis medidos com o MESMO SynthSeg têm contra cada norma, por idade e sexo (nível A do plano metodológico); a escala do z continua a da norma e a incerteza entra no intervalo de 90%"><input type="checkbox" id="opt-recentragem"> recentragem pelo método (controles do mesmo SynthSeg)</label>
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Brain charts (Bethlehem et al., Nature 2022). Aproximação para QC — não clínico;
-        |z| ≥ 4 sugere erro de segmentação.</p>
+        <p class="note">BrainChart (Bethlehem et al., Nature 2022) e CentileBrain (Ge et al., 2024) — normas de volumes
+        FreeSurfer. Aproximação para QC e pesquisa, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>
         <p class="note" id="norm-sub-note" hidden></p>
       </section>
 
@@ -310,7 +319,7 @@
         <button class="btn sm" data-export="nii-synthsr" disabled>MP-RAGE sintético</button>
         <button class="btn sm" data-export="nii-mask" disabled>Máscara</button>
         <button class="btn sm" data-export="nii-brain" disabled>Cérebro extraído</button>
-        <button class="btn sm" data-export="qc-csv" disabled title="QC por grupo tecidual (escore, confiança, coesão, simetria) — uma linha por exame, na forma do synthseg.qc.csv">QC .csv</button>
+        <button class="btn sm" data-export="qc-csv" disabled title="Índice de confiança interno (não validado) por grupo tecidual: índice, confiança, coesão, simetria — uma linha por exame, na forma do synthseg.qc.csv">QC .csv</button>
         <button class="btn sm" data-export="nii-confmap" disabled title="Mapa de confiança da rede (posterior máxima por voxel, 0–255)">Confiança .nii.gz</button>
         <button class="btn sm" data-export="nii-norm" disabled hidden title="Imagem sintética de córtex super-resolvido derivada das SDFs (norm.mgz do recon-all-clinical)">Norm sintético</button>
         <button class="btn sm" data-export="xfm" disabled hidden title="Transformada linear para o MNI por casamento de centros de massa (talairach.xfm)">talairach.xfm</button>
@@ -326,12 +335,22 @@
       </div>
       <h3 style="margin-top:14px">Coorte</h3>
       <div class="btn-row wrap">
+        <label class="check" title="Marque só para voluntários saudáveis examinados no MESMO equipamento e protocolo: eles estimam o desvio do sítio em relação à norma (calibração de nível C)"><input type="checkbox" id="coorte-controle"> controle saudável</label>
         <button class="btn sm" data-export="queue">Adicionar exame</button>
         <button class="btn sm" data-export="cohort-csv" disabled>CSV largo</button>
         <button class="btn sm" data-export="cohort-sav" disabled>SAV</button>
         <button class="btn sm ghost" data-export="cohort-clear" hidden>Limpar</button>
       </div>
       <p class="queue" id="queue">Coorte vazia.</p>
+      <h3 style="margin-top:14px">Calibração do sítio</h3>
+      <p class="note" id="calib-status">Sem exame carregado.</p>
+      <div class="btn-row wrap">
+        <button class="btn sm" id="calib-calcular" disabled title="Estima, por estrutura, o desvio médio (e o DP, com ≥ 30) do z dos controles deste protocolo">Calcular calibração</button>
+        <button class="btn sm ghost" id="calib-exportar" disabled title="Só estatísticas agregadas (n, média, DP, IC) — nenhum volume individual">Exportar</button>
+        <label class="btn sm ghost" style="cursor:pointer">Importar<input type="file" id="calib-importar" accept=".json,application/json" hidden></label>
+      </div>
+      <p class="note">≥ 10 controles: corrige o deslocamento; ≥ 30: também a escala. Use só controles do mesmo
+      equipamento e protocolo — calibração com outro sítio não se transfere.</p>
     </section>
     </div>
   </aside>

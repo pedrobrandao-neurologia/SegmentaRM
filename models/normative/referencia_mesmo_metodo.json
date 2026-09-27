@@ -1,0 +1,360 @@
+{
+ "versao": "1.0",
+ "gerado": "2026-09-27",
+ "fonte": "Dallas Lifespan Brain Study (OpenNeuro ds004856 v1.3.0, CC0; Park DC et al., Sci Data 2025;12:846) — onda 1, T1 MPRAGE Philips 3 T; FreeSurfer 5.3 com edição manual e revisão independente (derivatives/brainsummary)",
+ "fonteCurta": "DLBS (OpenNeuro ds004856, CC0)",
+ "n": 101,
+ "idadeRef": 60.0,
+ "idadeFaixa": [
+  21,
+  89
+ ],
+ "sexo": {
+  "F": 47,
+  "M": 54
+ },
+ "metodo": "IA = 200·(E − D)/(E + D) do volume suave do SynthSeg 1.0 do SegmentaRM; média linear na idade; DP linear na idade (E|resíduo| = √(2/π)·σ); exclusão de |resíduo| > 5 DP robustos",
+ "assimetria": {
+  "estruturas": {
+   "Thalamus": {
+    "media0": 5.7964,
+    "media1": -0.1073,
+    "dp0": 5.8456,
+    "dp1": -0.07392,
+    "dpMin": 1.851,
+    "n": 101,
+    "guadalupe2017": {
+     "media": 4.22,
+     "dp": 6.0
+    }
+   },
+   "Caudate": {
+    "media0": -1.6255,
+    "media1": 0.02602,
+    "dp0": 4.1354,
+    "dp1": 0.06426,
+    "dpMin": 0.815,
+    "n": 101,
+    "guadalupe2017": {
+     "media": -1.9,
+     "dp": 4.9
+    }
+   },
+   "Putamen": {
+    "media0": 5.9139,
+    "media1": 0.02493,
+    "dp0": 5.6079,
+    "dp1": 0.07153,
+    "dpMin": 1.409,
+    "n": 101,
+    "guadalupe2017": {
+     "media": 3.88,
+     "dp": 5.66
+    }
+   },
+   "Pallidum": {
+    "media0": -6.9898,
+    "media1": 0.07863,
+    "dp0": 18.0741,
+    "dp1": 0.09873,
+    "dpMin": 7.112,
+    "n": 101,
+    "guadalupe2017": {
+     "media": 3.6,
+     "dp": 10.39
+    }
+   },
+   "Hippocampus": {
+    "media0": -3.0432,
+    "media1": -0.0176,
+    "dp0": 5.803,
+    "dp1": 0.04836,
+    "dpMin": 1.958,
+    "n": 100,
+    "guadalupe2017": {
+     "media": -1.32,
+     "dp": 5.66
+    }
+   },
+   "Amygdala": {
+    "media0": -4.1858,
+    "media1": -0.02158,
+    "dp0": 8.5886,
+    "dp1": 0.06444,
+    "dpMin": 3.038,
+    "n": 101,
+    "guadalupe2017": {
+     "media": -4.1,
+     "dp": 10.39
+    }
+   },
+   "Accumbens-area": {
+    "media0": 0.8698,
+    "media1": -0.01649,
+    "dp0": 11.3305,
+    "dp1": 0.11973,
+    "dpMin": 3.33,
+    "n": 101,
+    "guadalupe2017": {
+     "media": -1.44,
+     "dp": 15.62
+    }
+   },
+   "VentralDC": {
+    "media0": 2.3017,
+    "media1": 0.04297,
+    "dp0": 5.6033,
+    "dp1": 0.01443,
+    "dpMin": 2.52,
+    "n": 101
+   },
+   "Lateral-Ventricle": {
+    "media0": 6.8573,
+    "media1": 0.0046,
+    "dp0": 15.9449,
+    "dp1": -0.04921,
+    "dpMin": 7.259,
+    "n": 101
+   },
+   "Inf-Lat-Vent": {
+    "media0": -2.2385,
+    "media1": 0.10068,
+    "dp0": 22.1383,
+    "dp1": 0.01742,
+    "dpMin": 10.729,
+    "n": 101
+   },
+   "Cerebral-Cortex": {
+    "media0": -0.2122,
+    "media1": 0.00433,
+    "dp0": 0.9687,
+    "dp1": 0.00164,
+    "dpMin": 0.452,
+    "n": 99
+   },
+   "Cerebral-White-Matter": {
+    "media0": -0.2624,
+    "media1": 0.00223,
+    "dp0": 1.1378,
+    "dp1": -0.00209,
+    "dpMin": 0.539,
+    "n": 101
+   },
+   "Cerebellum-Cortex": {
+    "media0": 0.8064,
+    "media1": 0.02196,
+    "dp0": 3.2567,
+    "dp1": 0.0082,
+    "dpMin": 1.468,
+    "n": 101
+   },
+   "Cerebellum-White-Matter": {
+    "media0": -0.4119,
+    "media1": 0.0025,
+    "dp0": 2.9742,
+    "dp1": 0.00999,
+    "dpMin": 1.292,
+    "n": 101
+   }
+  },
+  "diagnostico": {
+   "Thalamus": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 5.52,
+    "dp": 6.33,
+    "inclinacao_por_decada": -1.07,
+    "fs53": {
+     "media": 16.56,
+     "dp": 13.27
+    },
+    "guadalupe2017": {
+     "media": 4.22,
+     "dp": 6.0
+    }
+   },
+   "Caudate": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -1.56,
+    "dp": 4.61,
+    "inclinacao_por_decada": 0.26,
+    "fs53": {
+     "media": 5.49,
+     "dp": 17.15
+    },
+    "guadalupe2017": {
+     "media": -1.9,
+     "dp": 4.9
+    }
+   },
+   "Putamen": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 5.98,
+    "dp": 6.07,
+    "inclinacao_por_decada": 0.25,
+    "fs53": {
+     "media": -1.47,
+     "dp": 21.52
+    },
+    "guadalupe2017": {
+     "media": 3.88,
+     "dp": 5.66
+    }
+   },
+   "Pallidum": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -6.79,
+    "dp": 18.7,
+    "inclinacao_por_decada": 0.79,
+    "fs53": {
+     "media": 0.31,
+     "dp": 29.45
+    },
+    "guadalupe2017": {
+     "media": 3.6,
+     "dp": 10.39
+    }
+   },
+   "Hippocampus": {
+    "n": 100,
+    "excluidos": 1,
+    "media": -3.09,
+    "dp": 6.15,
+    "inclinacao_por_decada": -0.18,
+    "fs53": {
+     "media": -2.11,
+     "dp": 11.81
+    },
+    "guadalupe2017": {
+     "media": -1.32,
+     "dp": 5.66
+    }
+   },
+   "Amygdala": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -4.24,
+    "dp": 9.36,
+    "inclinacao_por_decada": -0.22,
+    "fs53": {
+     "media": -8.93,
+     "dp": 18.25
+    },
+    "guadalupe2017": {
+     "media": -4.1,
+     "dp": 10.39
+    }
+   },
+   "Accumbens-area": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 0.83,
+    "dp": 12.11,
+    "inclinacao_por_decada": -0.16,
+    "fs53": {
+     "media": -16.64,
+     "dp": 39.25
+    },
+    "guadalupe2017": {
+     "media": -1.44,
+     "dp": 15.62
+    }
+   },
+   "VentralDC": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 2.41,
+    "dp": 5.84,
+    "inclinacao_por_decada": 0.43,
+    "fs53": {
+     "media": 2.24,
+     "dp": 14.71
+    }
+   },
+   "Lateral-Ventricle": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 6.87,
+    "dp": 17.17,
+    "inclinacao_por_decada": 0.05,
+    "fs53": {
+     "media": 6.24,
+     "dp": 22.59
+    }
+   },
+   "Inf-Lat-Vent": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -1.98,
+    "dp": 24.1,
+    "inclinacao_por_decada": 1.01,
+    "fs53": {
+     "media": 11.82,
+     "dp": 51.43
+    }
+   },
+   "Cerebral-Cortex": {
+    "n": 99,
+    "excluidos": 2,
+    "media": -0.2,
+    "dp": 1.04,
+    "inclinacao_por_decada": 0.04
+   },
+   "Cerebral-White-Matter": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -0.26,
+    "dp": 1.22,
+    "inclinacao_por_decada": 0.02
+   },
+   "Cerebellum-Cortex": {
+    "n": 101,
+    "excluidos": 0,
+    "media": 0.86,
+    "dp": 3.21,
+    "inclinacao_por_decada": 0.22,
+    "fs53": {
+     "media": -2.79,
+     "dp": 4.87
+    }
+   },
+   "Cerebellum-White-Matter": {
+    "n": 101,
+    "excluidos": 0,
+    "media": -0.41,
+    "dp": 3.04,
+    "inclinacao_por_decada": 0.02,
+    "fs53": {
+     "media": -4.38,
+     "dp": 14.36
+    }
+   }
+  }
+ },
+ "hoc": {
+  "definicao": "HOC = V_hipocampo / (V_hipocampo + V_corno_temporal), volume suave; média quadrática e DP linear na idade",
+  "lados": {
+   "E": {
+    "media0": 0.8569,
+    "media1": -0.0023168,
+    "media2": -3.9448e-05,
+    "dp0": 0.04011,
+    "dp1": 0.0007857,
+    "dpMin": 0.0047,
+    "n": 98
+   },
+   "D": {
+    "media0": 0.85421,
+    "media1": -0.0023759,
+    "media2": -4.2037e-05,
+    "dp0": 0.0511,
+    "dp1": 0.0010971,
+    "dpMin": 0.0042,
+    "n": 100
+   }
+  }
+ }
+}

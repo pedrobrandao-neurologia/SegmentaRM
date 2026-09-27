@@ -1,1 +1,5 @@
 __pycache__/
+node_modules
+tests/golden/.cache/
+tests/golden/.local/
+tests/golden/resultados/

@@ -1,0 +1,15 @@
+{
+  "name": "segmentarm",
+  "private": true,
+  "description": "SegmentaRM — volumetria encefálica no navegador. Este package.json existe só para os testes; o app é estático e não precisa de build.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "test:navegador": "node tests/browser/run.mjs",
+    "test:golden": "node tests/golden/run.mjs",
+    "manifesto": "node tools/manifesto_sha256.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

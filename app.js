@@ -7,18 +7,22 @@ import { Niivue, NVImage, NVMesh, SLICE_TYPE } from './vendor/niivue.js'
 import { Dcm2niix } from './vendor/dcm2niix/index.jpeg.js'
 import { inferenceModelsList, brainChopOpts } from './brainchop/brainchop-parameters.js'
 import { assessQuality } from './lib/quality.js'
-import { computeStats, statsToCSV, statsToJSON, statsToWideRow, AVISO_ESPESSURA } from './lib/stats.js'
+import { computeStats, aplicarVolumesSuaves, statsToCSV, statsToJSON, statsToWideRow, AVISO_ESPESSURA } from './lib/stats.js'
 import { GROUP_PT, ptNameOf } from './lib/labels.js'
 import { writeNifti, gzipBuffer } from './lib/nifti-writer.js'
 import { tableToSav } from './lib/sav.js'
 import { buildReport } from './lib/report.js'
 import { makeZip } from './lib/zip.js'
 import { fuseDKT } from './lib/dkt-fusion.js'
-import { loadNorms, compareToNorms } from './lib/normative.js'
-import { scanDicomSeries, directSeriesToNifti } from './lib/dicom-scan.js'
+import { loadNorms, compareToNorms, formatPercentil, seloNorma } from './lib/normative.js'
+import { scanDicomSeries, directSeriesToNifti, correcaoDistorcao } from './lib/dicom-scan.js'
+import { protocoloDe } from './lib/protocolo.js'
+import { avaliarRegras, ocupacaoHipocampal, alvosDeCaptura } from './lib/qcrules.js'
+import { carregarAssimetria, anotarAssimetria, referenciaAssimetria, zHoc } from './lib/assimetria.js'
+import { calcularCalibracao, salvarCalibracao, calibracaoPara, calibracaoDesatualizada, lerCalibracoes, importarCalibracoes, N_MIN_DESLOCAMENTO, N_MIN_ESCALA } from './lib/calibracao.js'
 import { computeSegQC, qcToCSV } from './lib/segqc.js'
 
-const VERSION = '1.0.0'
+const VERSION = '1.1.0'
 // Superfícies corticais (passo 05) em revisão: a malha gerada não está confiável, então
 // NADA do passo 05 entra nas exportações (CSV/JSON/SAV/PDF/ZIP/coorte, MZ3, norm,
 // talairach.xfm). Reative aqui quando o passo estiver validado.
@@ -753,7 +757,10 @@ async function handleDicomInput (allFiles) {
       }
       if (!done) {
         log(`Série "${g.desc}": convertendo com dcm2niix (${g.count} arquivos)…`)
-        entries.push(await convertDicom(g.files))
+        const conv = await convertDicom(g.files)
+        // o sidecar do dcm2niix (anonimizado) não traz a idade na data do exame nem o sexo:
+        // completa com a leitura de cabeçalho da própria série (sem datas)
+        entries.push({ ...conv, sidecar: { ...(g.sidecar || {}), ...(conv.sidecar || {}) } })
       }
     } catch (err) {
       log(`Série "${g.desc}" falhou: ${err.message} — seguindo para a próxima.`, 'err')
@@ -883,7 +890,9 @@ async function loadVolumeFile (file, sidecar, desc) {
   state.rawVol = vol
   await clearSegmentationState({ withConformed: true })
   state.sidecar = sidecar || null
+  if (state.sidecar && !state.sidecar.CorrecaoDistorcao) state.sidecar.CorrecaoDistorcao = correcaoDistorcao(state.sidecar)
   state.inputDesc = desc
+  preencherIdadeSexo(state.sidecar)
   state.wl = null
   autoWindow()
   $('viewer-block').hidden = false
@@ -895,6 +904,8 @@ async function loadVolumeFile (file, sidecar, desc) {
   const dims = [vol.hdr.dims[1], vol.hdr.dims[2], vol.hdr.dims[3]]
   const pixDims = [vol.hdr.pixDims[1], vol.hdr.pixDims[2], vol.hdr.pixDims[3]]
   state.quality = assessQuality({ dims, pixDims }, vol.img, sidecar)
+  try { state.protocolo = await protocoloDe(state.sidecar, pixDims) } catch { state.protocolo = null }
+  atualizarCalibracao()
   renderQuality(state.quality)
   $('step-quality').hidden = false
   $('step-run').hidden = false
@@ -914,6 +925,22 @@ async function loadVolumeFile (file, sidecar, desc) {
   if (state.quality.robustRecommended) tlNote('load', 'a régua recomenda o pipeline robusto — será aplicado no modo "Automático"', 'decision')
   tlDone('load', [{ label: 'ver exame original', view: 'raw' }])
   progress(0)
+}
+
+// idade NA DATA DO EXAME e sexo lidos do DICOM: um exame novo é outro paciente, então os
+// valores do cabeçalho substituem os dos campos (o usuário pode corrigir depois)
+function preencherIdadeSexo (sc) {
+  state.idadeFonte = null
+  if (!sc) return
+  const age = $('age'); const sex = $('sex')
+  if (sc.IdadeNoExame > 0) {
+    const antes = parseFloat(age.value)
+    age.value = String(sc.IdadeNoExame)
+    state.idadeFonte = sc.IdadeFonte
+    log(`Idade preenchida do DICOM: ${String(sc.IdadeNoExame).replace('.', ',')} anos na data do exame (${sc.IdadeFonte})` +
+      (antes > 0 && Math.abs(antes - sc.IdadeNoExame) > 0.05 ? ` — substituiu o valor anterior (${antes}).` : '.'), 'ok')
+  }
+  if (sc.PatientSex === 'M' || sc.PatientSex === 'F') sex.value = sc.PatientSex
 }
 
 function renderQuality (q) {
@@ -1273,14 +1300,17 @@ async function applySegmentationResult (labelsPath, colormapPath) {
     progress(0.95)
     await yieldUI()
     state.stats = computeStats(state.seg, state.conformed.img, dimsOf(state.conformed), state.labelsMap, affineOf(state.conformed), voxVolOf(state.conformed))
-    // SynthSeg: volume soft por estrutura (soma dos posteriors), a convenção do --vol
-    // oficial; só vale para a segmentação da própria rede (o DKT troca os rótulos)
-    if (state.segKind === 'synthseg' && state.segVolSoft) {
+    // volume SUAVE (soma das posteriores — o --vol do SynthSeg oficial) como valor principal;
+    // a contagem de voxels fica como auditoria. Vale também depois do DKT: os índices 0–31 do
+    // mapa combinado são os do SynthSeg e o córtex suave é redistribuído entre as parcelas
+    if (/^synthseg/.test(state.segKind || '') && state.segVolSoft) {
       const vv = state.segVolSoftUnit === 'mm3' ? 1 : (state.stats.voxVol || voxVolOf(state.conformed))
-      for (const r of state.stats.rows) {
-        if (r.index > 0 && r.index < state.segVolSoft.length) r.volSoftMm3 = state.segVolSoft[r.index] * vv
+      const suave = {}
+      for (let i = 1; i < state.segVolSoft.length; i++) {
+        const nm = state.labelsMap && state.labelsMap[i]
+        if (nm) suave[nm] = state.segVolSoft[i] * vv
       }
-      state.stats.volumeSoft = true
+      state.stats = aplicarVolumesSuaves(state.stats, suave)
     }
     renderResults()
     await yieldUI()
@@ -1296,11 +1326,11 @@ async function applySegmentationResult (labelsPath, colormapPath) {
       renderQC()
       const r = state.qc.resumo
       const alertas = r.gruposEmAlerta.length
-      log(`QC da segmentação: escore mínimo ${r.escoreMinimo.toFixed(2)}, médio ${r.escoreMedio.toFixed(2)}` +
+      log(`Índice de confiança interno (não validado): mínimo ${r.escoreMinimo.toFixed(2)}, médio ${r.escoreMedio.toFixed(2)}` +
         (alertas ? ` — ${alertas} grupo(s) abaixo de 0,65: ${r.gruposEmAlerta.join(', ')}.` : ' — nenhum grupo em alerta.'),
       alertas ? 'err' : 'ok')
       if (TL.current) {
-        tlNote(TL.current, `QC por grupo tecidual: mínimo ${r.escoreMinimo.toFixed(2)} · médio ${r.escoreMedio.toFixed(2)}` +
+        tlNote(TL.current, `índice de confiança interno (não validado): mínimo ${r.escoreMinimo.toFixed(2)} · médio ${r.escoreMedio.toFixed(2)}` +
           (alertas ? ` — em alerta: ${r.gruposEmAlerta.join(', ')}` : ' — nenhum grupo em alerta'), alertas ? 'warn' : 'info')
         if (!r.confiancaDisponivel) tlNote(TL.current, 'rede sem posteriores — QC usa só coesão e simetria', 'warn')
       }
@@ -1739,7 +1769,7 @@ function renderQC () {
   const fmt = (x, d = 2) => x == null ? '—' : (+x).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
   const tb = $('qc-table')
   tb.querySelector('thead').innerHTML =
-    '<tr><th>Grupo tecidual</th><th>Escore</th><th>Conf.</th><th>Coes.</th><th>Sim.</th></tr>'
+    '<tr><th>Grupo tecidual</th><th title="Índice de confiança interno, não validado">Índice</th><th>Conf.</th><th>Coes.</th><th>Sim.</th></tr>'
   tb.querySelector('tbody').innerHTML = state.qc.grupos.filter(q => q.voxels > 0).map(q => {
     const pct = Math.max(0, Math.min(100, q.escore * 100))
     return `<tr class="${q.alerta ? 'bad' : ''}"><td title="${q.pt}">${q.curto || q.pt}</td>` +
@@ -1747,7 +1777,7 @@ function renderQC () {
       `<td>${fmt(q.confianca)}</td><td>${fmt(q.coesao)}</td><td>${q.simetria == null ? '—' : fmt(q.simetria)}</td></tr>`
   }).join('')
   const r = state.qc.resumo
-  $('qc-summary').textContent = `Escore mínimo ${fmt(r.escoreMinimo)} · médio ${fmt(r.escoreMedio)}` +
+  $('qc-summary').textContent = `Índice mínimo ${fmt(r.escoreMinimo)} · médio ${fmt(r.escoreMedio)}` +
     (r.gruposEmAlerta.length ? ` · ${r.gruposEmAlerta.length} grupo(s) abaixo de 0,65` : ' · nenhum grupo em alerta') +
     (r.confiancaDisponivel ? '' : ' · sem posteriores da rede (confiança neutra)')
   $('qc-panel').hidden = false
@@ -1989,7 +2019,11 @@ function renderTable () {
   const vic = state.icv && state.icv.vic_mm3 > 0 ? state.icv.vic_mm3 : null
   const thead = $('table').querySelector('thead')
   const tbody = $('table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th><th style="text-align:right">Volume (mm³)</th><th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th>' +
+  const suave = !!s.volumeSoft
+  thead.innerHTML = '<tr><th>Estrutura</th><th>Hemisfério</th>' +
+    `<th style="text-align:right" title="${suave ? 'Valor principal: volume SUAVE — soma das probabilidades posteriores da rede (convenção --vol do SynthSeg)' : 'Contagem de voxels rotulados (a rede não fornece posteriores)'}">Volume (mm³)${suave ? ' · suave' : ''}</th>` +
+    (suave ? '<th style="text-align:right" title="Auditoria: contagem de voxels do argmax (volume rígido)">Rígido</th>' : '') +
+    '<th style="text-align:right" title="Percentual do total rotulado (todos os rótulos, com tronco e líquor) — o mesmo denominador do CSV e do PDF">% total rotulado</th><th style="text-align:right">Intensidade média</th>' +
     (vic ? '<th style="text-align:right" title="Percentual do volume intracraniano estimado (eTIV) — volume normalizado pelo tamanho da cabeça">% VIC</th>' : '') + '</tr>'
   tbody.innerHTML = ''
   let lastGroup = null
@@ -2000,7 +2034,7 @@ function renderTable () {
     if (r.group !== lastGroup) {
       const tr = document.createElement('tr')
       tr.className = 'groupsep'
-      tr.innerHTML = `<td colspan="${vic ? 6 : 5}">${GROUP_PT[r.group] || r.group}</td>`
+      tr.innerHTML = `<td colspan="${5 + (vic ? 1 : 0) + (suave ? 1 : 0)}">${GROUP_PT[r.group] || r.group}</td>`
       tbody.appendChild(tr)
       lastGroup = r.group
     }
@@ -2009,6 +2043,7 @@ function renderTable () {
     tr.innerHTML = `<td>${sw ? `<i class="swatch" style="background:${sw}"></i>` : ''}${r.ptName}</td>` +
       `<td>${r.hemi || '—'}</td>` +
       `<td class="num">${Math.round(r.volMm3).toLocaleString('pt-BR')}</td>` +
+      (suave ? `<td class="num" style="color:var(--muted)" title="${r.metodoVolume === 'suave-redistribuido' ? 'córtex suave redistribuído na proporção das parcelas' : ''}">${r.volHardMm3 != null ? Math.round(r.volHardMm3).toLocaleString('pt-BR') : '—'}</td>` : '') +
       `<td class="num">${r.pctBrain.toFixed(2)}</td>` +
       `<td class="num">${r.meanInt.toFixed(1)}</td>` +
       (vic ? `<td class="num">${(100 * r.volMm3 / vic).toFixed(3)}</td>` : '')
@@ -2028,10 +2063,14 @@ function renderTable () {
 
 function renderLadder () {
   const s = state.stats
-  const pairs = s.pairs.slice(0, 30)
+  // pares com referência do mesmo método primeiro (por |zIA|); depois os demais, por |IA|
+  const anot = state.assimetria && state.assimetria.length ? state.assimetria : s.pairs
+  const comRef = anot.filter(p => p.zIA != null).sort((a, b) => Math.abs(b.zIA) - Math.abs(a.zIA))
+  const semRef = anot.filter(p => p.zIA == null).sort((a, b) => Math.abs(b.ai) - Math.abs(a.ai))
+  const pairs = [...comRef, ...semRef].slice(0, 30)
   const el = $('ladder')
   if (!pairs.length) { el.innerHTML = '<p class="note">O modelo escolhido não separa hemisférios — sem pares para comparar.</p>'; return }
-  const W = 860, rowH = 21, left = 245, right = 70
+  const W = 860, rowH = 21, left = 245, right = 112
   const H = pairs.length * rowH + 30
   const mid = left + (W - left - right) / 2
   const half = (W - left - right) / 2
@@ -2047,8 +2086,10 @@ function renderLadder () {
     svg += `<text x="${left - 10}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10.5" fill="var(--ink)">${escapeXml(name)}</text>`
     svg += `<rect x="${mid - wl}" y="${y}" width="${Math.max(1, wl)}" height="12" fill="var(--accent)" rx="2"><title>${escapeXml(p.ptName)} E: ${Math.round(p.left)} mm³</title></rect>`
     svg += `<rect x="${mid}" y="${y}" width="${Math.max(1, wr)}" height="12" fill="#5E7286" rx="2"><title>${escapeXml(p.ptName)} D: ${Math.round(p.right)} mm³</title></rect>`
-    const aiTxt = (p.ai > 0 ? '+' : '') + p.ai.toFixed(1) + '%'
-    svg += `<text x="${W - 4}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="${Math.abs(p.ai) > 10 ? 'var(--accent-strong)' : 'var(--dim)'}">${aiTxt}</text>`
+    // cor só com referência do mesmo método (|zIA| ≥ 2); sem referência, o IA é descritivo
+    const aiTxt = (p.ai > 0 ? '+' : '') + p.ai.toFixed(1) + '%' + (p.zIA != null ? ` z${fmtZs(p.zIA, 1)}` : '')
+    const tip = p.zIA != null ? `IA esperado ${p.iaMedia.toFixed(1)} ± ${p.iaDp.toFixed(1)}% (controles do mesmo método)` : 'sem referência do mesmo método: IA descritivo'
+    svg += `<text x="${W - 4}" y="${y + 9}" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" fill="${p.zIA != null && Math.abs(p.zIA) >= 2 ? 'var(--accent-strong)' : 'var(--dim)'}"><title>${escapeXml(tip)}</title>${aiTxt}</text>`
   }
   svg += '</svg>'
   el.innerHTML = svg
@@ -2061,11 +2102,14 @@ async function updateNorms () {
   if (!state.stats || !(age > 0) || !(sex === 'F' || sex === 'M')) {
     state.norms = null
     $('norm-panel').hidden = true
+    atualizarAlertas()
     return
   }
   try {
     await loadNorms()
-    state.norms = compareToNorms(state.stats, { age, sex })
+    atualizarRecentragem()
+    atualizarCalibracao() // a calibração depende do modo (com/sem recentragem)
+    state.norms = compareToNorms(state.stats, { age, sex }, normOpts())
     renderNorms()
     if (state.norms.flags.length) {
       const worst = state.norms.flags[0]
@@ -2074,7 +2118,100 @@ async function updateNorms () {
   } catch (e) {
     log('Normativo indisponível: ' + e.message, 'err')
   }
+  atualizarAlertas()
 }
+
+// ---------- alertas de QC (regras declarativas) ----------
+function atualizarAlertas () {
+  if (!state.stats) { state.alertasQC = []; state.hoc = null; state.assimetria = null; renderAlertas(); return }
+  const idade = parseFloat($('age').value)
+  state.hoc = ocupacaoHipocampal(state.stats)
+  // HOC contra controles do mesmo método (quando há referência e idade)
+  for (const lado of Object.keys(state.hoc)) {
+    const zh = idade > 0 ? zHoc(state.hoc[lado].hoc, lado, idade) : null
+    if (zh) Object.assign(state.hoc[lado], { z: zh.z, esperado: zh.media, dp: zh.dp })
+  }
+  // z do índice de assimetria contra controles medidos com o MESMO método (quando há referência)
+  state.assimetria = anotarAssimetria(state.stats.pairs, idade > 0 ? idade : null)
+  state.alertasQC = state.regrasQC
+    ? avaliarRegras(state.regrasQC, {
+      idade: idade > 0 ? idade : null,
+      sexo: $('sex').value || null,
+      normas: state.norms && state.norms.available ? state.norms : null,
+      stats: state.stats,
+      qc: state.qc,
+      icv: state.icv,
+      hoc: state.hoc,
+      assimetria: state.assimetria || [],
+      aquisicao: aquisicaoMeta()
+    })
+    : []
+  renderAlertas()
+  if ($('ladder') && state.stats.pairs) renderLadder()
+  for (const a of state.alertasQC.filter(x => x.severidade !== 'info')) log(`Alerta de QC — ${a.titulo}: ${a.mensagem}`, a.severidade === 'alerta' ? 'err' : '')
+}
+
+function renderAlertas () {
+  const ul = $('alertas-list')
+  if (!ul) return
+  const al = state.alertasQC || []
+  $('alertas-panel').hidden = !state.stats
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  const hoc = state.hoc || {}
+  const hocTxt = ['E', 'D'].filter(l => hoc[l]).map(l => `${l} ${hoc[l].hoc.toFixed(2).replace('.', ',')}` + (hoc[l].z != null ? ` (z ${fmtZs(hoc[l].z, 1)})` : '')).join(' · ')
+  const hocRef = ['E', 'D'].some(l => hoc[l] && hoc[l].z != null)
+  ul.innerHTML = (al.length
+    ? al.map(a => `<li class="al-${a.severidade}"><b>${esc(a.titulo)}</b> — ${esc(a.mensagem)}<br><span>${esc(a.recomendacao)}</span> <i>(${esc(a.status)})</i></li>`).join('')
+    : '<li class="al-ok">Nenhuma regra disparada.</li>') +
+    (hocTxt ? `<li class="al-info">Ocupação hipocampal (HOC = hipocampo ÷ [hipocampo + corno temporal]): ${hocTxt} — ${hocRef ? 'z contra controles do DLBS medidos com o mesmo SynthSeg, por idade' : 'descritiva (sem idade ou sem a referência do mesmo método)'}.</li>` : '')
+}
+
+// cortes automáticos para a inspeção guiada: um plano por vez, mira no ponto RAS do alvo,
+// com a segmentação sobreposta; restaura o tipo de corte e a mira no fim
+async function capturarCortes (alvos) {
+  const nv = state.nv
+  if (!nv || !state.conformed || !state.seg || !alvos.length) return []
+  const out = []
+  const mira = nv.scene && nv.scene.crosshairPos ? Array.from(nv.scene.crosshairPos) : null
+  try {
+    if (nv.volumes.length < 2) await viewDeliverable('seg', 'segmentação')
+    for (const a of alvos) {
+      try {
+        nv.setSliceType(a.plano === 'coronal' ? nv.sliceTypeCoronal : a.plano === 'sagital' ? nv.sliceTypeSagittal : nv.sliceTypeAxial)
+        nv.scene.crosshairPos = nv.mm2frac(a.mm)
+        nv.drawScene()
+        await new Promise(r => requestAnimationFrame(() => r()))
+        nv.drawScene()
+        const url = nv.canvas.toDataURL('image/jpeg', 0.88)
+        const bin = atob(url.split(',')[1])
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        out.push({ bytes, w: nv.canvas.width, h: nv.canvas.height, legenda: a.legenda })
+      } catch { /* corte fora do volume */ }
+    }
+  } finally {
+    try {
+      applySliceType()
+      if (mira) nv.scene.crosshairPos = mira
+      nv.drawScene()
+    } catch { /* visualizador indisponível */ }
+  }
+  return out
+}
+
+// opções da comparação normativa: proveniência da medida do paciente, recentragem pelo método
+// (nível A, se ligada) e calibração de sítio (nível C, se houver para o protocolo do exame)
+function normOpts () {
+  return {
+    ferramentaPaciente: state.modelUsed || null,
+    metodoVolume: state.stats && state.stats.volumeSoft ? 'suave' : 'rígido',
+    recentragem: state.recentragemAtiva ? state.recentragem : null,
+    calibracao: state.calibracao || null
+  }
+}
+
+// z com sinal explícito (− tipográfico); d casas decimais
+function fmtZs (z, d = 2) { return z == null || !isFinite(z) ? '—' : Math.abs(z) < 0.5 * 10 ** -d ? (0).toFixed(d) : (z >= 0 ? '+' : '−') + Math.abs(z).toFixed(d) }
 
 function renderNorms () {
   const n = state.norms
@@ -2082,34 +2219,47 @@ function renderNorms () {
   $('norm-panel').hidden = false
   const thead = $('norm-table').querySelector('thead')
   const tbody = $('norm-table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th></th></tr>'
+  thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th style="text-align:right" title="Intervalo de 90% do z: erro de medida (teste-reteste publicado; entre scanners se o sítio não está calibrado) + recentragem + calibração. Não inclui a incerteza do próprio modelo normativo.">IC 90%</th><th></th></tr>'
   tbody.innerHTML = ''
   const sub = n.subcorticais || []
-  const rows = [...n.globals, ...n.lobes, ...(sub.length ? [{ sep: 'Subcorticais — CentileBrain (por hemisfério)' }] : []), ...sub]
+  const pv = n.proveniencia || {}
+  const rows = [{ sep: 'Globais — BrainChart', selo: seloNorma(pv.brainchart, pv) }, ...n.globals,
+    ...(sub.length ? [{ sep: 'Subcorticais — CentileBrain (por hemisfério)', selo: seloNorma(pv.centilebrain, pv) }] : []), ...sub]
   for (const g of rows) {
     const tr = document.createElement('tr')
     if (g.sep) {
-      tr.innerHTML = `<td colspan="5" style="color:var(--muted);font-family:var(--mono);font-size:10.5px;padding-top:8px">${g.sep}</td>`
+      tr.innerHTML = `<td colspan="6" style="color:var(--muted);font-family:var(--mono);font-size:10.5px;padding-top:8px" title="${g.selo || ''}">${g.sep}</td>`
       tbody.appendChild(tr)
       continue
     }
     const flagTxt = g.flag === 'erro?' ? '⚠ erro?' : g.flag === 'atipico' ? '· atípico' : ''
-    tr.innerHTML = `<td>${g.pt}</td>` +
+    const marca = (g.holm ? ' *' : '') + (g.preEspecificada ? ' •' : '')
+    // idade na borda da norma: z em cinza (estimativa instável)
+    const cinza = g.extrapolacao ? 'color:var(--muted)' : ''
+    const inc = g.incerteza
+    tr.title = [g.extrapolacao ? (g.recentrado && g.recentrado.foraDaFaixa ? 'idade fora da faixa em que a recentragem foi ajustada — z instável' : 'idade na borda/fora da faixa da norma — z instável') : '', g.holm ? 'significativo após correção de Holm (α 5%)' : '', g.preEspecificada ? 'estrutura pré-especificada' : '', g.calibrado ? `calibrado (n = ${g.calibrado.n})` : '', g.recentrado ? `z recentrado pelo método (controles do mesmo método ficam em z ${fmtZs(g.recentrado.desloc)} nesta idade; z sem recentragem ${fmtZs(g.zBruto)})` : '',
+      inc ? `IC 90%: medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` + (inc.recentragem ? `, recentragem ±${(1.645 * inc.recentragem).toFixed(2)}` : '') + (inc.calibracao ? `, calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : '') : ''].filter(Boolean).join(' · ')
+    tr.innerHTML = `<td>${g.pt}${marca}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
-      `<td class="num">${g.percentile != null ? g.percentile.toFixed(g.percentile < 1 || g.percentile > 99 ? 1 : 0) : '—'}</td>` +
-      `<td class="num">${g.z != null ? (g.z >= 0 ? '+' : '') + g.z.toFixed(2) : '—'}</td>` +
+      `<td class="num" style="${cinza}">${formatPercentil(g.percentile)}</td>` +
+      `<td class="num" style="${cinza}">${g.z != null ? fmtZs(g.z) : '—'}</td>` +
+      `<td class="num" style="color:var(--muted);font-size:10.5px">${g.ic90 ? `${fmtZs(g.ic90[0], 1)} a ${fmtZs(g.ic90[1], 1)}` : '—'}</td>` +
       `<td style="color:${g.flag === 'erro?' ? 'var(--accent-strong)' : 'var(--warn)'};font-family:var(--mono);font-size:10.5px">${flagTxt}</td>`
     tbody.appendChild(tr)
   }
-  const info = n.subcorticalInfo
   const note = $('norm-sub-note')
   if (note) {
-    note.hidden = !info
-    if (info) {
-      note.textContent = 'Subcorticais: CentileBrain (Ge et al., Lancet Digit Health 2024; ENIGMA Lifespan), ' +
-        'GAMLSS por sexo e hemisfério, volumes FreeSurfer aseg — o SynthSeg difere sistematicamente do aseg; sem ajuste por VIC.' +
-        (info.foraDaFaixaEtaria ? ` Idade fora da faixa de treino (${info.faixaTreino.map(v => v.toFixed(0)).join('–')} anos): usada a curva da borda.` : '')
+    const m = n.multiplicidade
+    const partes = []
+    if (m && m.m) {
+      partes.push(`${m.m} medidas comparadas: por acaso, espera-se ~${m.esperadoAbs2.toFixed(1).replace('.', ',')} com |z| > 2; observadas ${m.observadoAbs2}. Após a correção de Holm (α 5%, *), ${m.holmSignificativos} permanece(m). • = pré-especificada.`)
+      if (m.observadoAbs2 >= 3 && m.observadoAbs2 > 3 * m.esperadoAbs2 && (m.fracPositivos > 0.8 || m.fracPositivos < 0.2)) {
+        partes.push(`Desvios em bloco (${Math.round(100 * (m.fracPositivos > 0.5 ? m.fracPositivos : 1 - m.fracPositivos))}% no mesmo sentido): padrão típico de viés de medida/norma ou de sítio não calibrado, não de biologia.`)
+      }
     }
+    partes.push('As normas são de volumes FreeSurfer; o paciente é medido com outra ferramenta — sem a recentragem pelo método (controles do mesmo SynthSeg) ou a calibração do sítio, os z podem ter viés sistemático. z em cinza: idade na borda da norma. IC 90%: erro de medida (entre scanners enquanto o sítio não estiver calibrado) + recentragem + calibração; não inclui a incerteza do próprio modelo normativo.')
+    note.hidden = false
+    note.textContent = partes.join(' ')
   }
 }
 
@@ -2131,10 +2281,69 @@ function loadReportFonts () {
 function escapeXml (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 
 // ---------- exportações ----------
+// parâmetros de aquisição lidos do cabeçalho (nenhum identificador, nenhuma data)
+function aquisicaoMeta () {
+  const sc = state.sidecar || {}
+  const ms = (v, d) => v != null && isFinite(v) ? +(v * 1000).toFixed(d) : null
+  return {
+    fabricante: sc.Manufacturer || null,
+    modelo: sc.ManufacturersModelName || null,
+    campoT: sc.MagneticFieldStrength || null,
+    serie: sc.SeriesDescription || sc.ProtocolName || null,
+    sequencia: sc.SequenceName || sc.ScanningSequence || null,
+    tipoAquisicao: sc.MRAcquisitionType || null,
+    trMs: ms(sc.RepetitionTime, 1), teMs: ms(sc.EchoTime, 2), tiMs: ms(sc.InversionTime, 0),
+    anguloGraus: sc.FlipAngle || null,
+    software: sc.SoftwareVersions || null,
+    correcaoDistorcao: sc.CorrecaoDistorcao || (state.sidecar ? correcaoDistorcao(sc) : 'não verificado (entrada sem cabeçalho DICOM)'),
+    voxelMm: state.quality ? state.quality.voxel.map(v => +v.toFixed(3)) : null
+  }
+}
+
+// componentes que produziram este resultado, com o SHA-256 do manifesto
+function reprodutibilidadeMeta () {
+  const comp = (state.manifesto && state.manifesto.componentes) || {}
+  const usados = []
+  const add = (k) => { if (comp[k]) usados.push({ nome: k, descricao: comp[k].descricao, sha256: comp[k].sha256 }) }
+  const modelo = state.modelUsed || ''
+  if (/SynthSeg/i.test(modelo)) add('synthseg1')
+  if (/FastSurfer/i.test(modelo)) add('fastsurfer')
+  if (state.synthsr) add('synthsr')
+  if (state.norms && state.norms.available) { add('normas_brainchart'); if (state.norms.subcorticais) add('normas_centilebrain') }
+  if (state.icv) add('vic_template')
+  if (state.norms && state.norms.available) {
+    if (state.recentragemAtiva) add('recentragem')
+    if (state.norms.globals.some(g => g.ic90) || (state.norms.subcorticais || []).some(g => g.ic90)) add('erro_medida')
+  }
+  if ((state.assimetria || []).some(p => p.zIA != null)) add('referencia_mesmo_metodo')
+  if (state.regrasQC) add('regras_qc')
+  return {
+    versaoApp: VERSION,
+    manifestoGerado: state.manifesto ? state.manifesto.gerado : null,
+    componentes: usados,
+    nota: usados.length ? null : 'manifesto de hashes indisponível nesta sessão'
+  }
+}
+
+// referência de assimetria usada (fonte, n, faixa etária) — sem os coeficientes
+function referenciaAssimetriaMeta () {
+  const r = referenciaAssimetria()
+  return r ? { fonte: r.fonte, fonteCurta: r.fonteCurta || null, metodo: r.metodo, n: r.n, idadeFaixa: r.idadeFaixa, versao: r.versao } : null
+}
+
 function metaNow () {
   return {
     tool: 'SegmentaRM',
     version: VERSION,
+    idadeFonte: state.idadeFonte || null,
+    controle: !!($('coorte-controle') && $('coorte-controle').checked),
+    alertasQC: state.alertasQC || [],
+    hoc: state.hoc || null,
+    assimetria: state.assimetria || null,
+    refAssimetria: referenciaAssimetriaMeta(),
+    aquisicao: aquisicaoMeta(),
+    protocolo: state.protocolo || null,
+    reprodutibilidade: reprodutibilidadeMeta(),
     subject: $('subject').value || ($('stage-title').textContent || 'exame'),
     age: parseFloat($('age').value) || null,
     sex: $('sex').value || null,
@@ -2217,7 +2426,13 @@ async function makeExports () {
       const { row, labels } = statsToWideRow(state.stats, meta)
       return tableToSav([row], labels, 'SegmentaRM ' + meta.subject)
     },
-    pdf: async () => buildReport({ stats: state.stats, meta, snapshot: await snapshotJpeg(), fonts: await loadReportFonts() }),
+    pdf: async () => {
+      const snapshot = await snapshotJpeg()
+      // inspeção guiada: cortes pelas estruturas envolvidas nos alertas que pedem captura
+      const alvos = alvosDeCaptura(state.alertasQC || [], state.stats)
+      const imagens = alvos.length ? await capturarCortes(alvos) : []
+      return buildReport({ stats: state.stats, meta: { ...meta, inspecao: { alertas: state.alertasQC || [], imagens, hoc: state.hoc || null } }, snapshot, fonts: await loadReportFonts() })
+    },
     niiSeg: async () => {
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm ' + meta.model.slice(0, 40) }, state.seg)
       return await gzipBuffer(buf)
@@ -2359,7 +2574,8 @@ async function handleExport (kind) {
         state.cohort.push({ row, labels })
         persistCohort()
         renderCohort()
-        log(`Exame "${row.subject}" adicionado à coorte (${state.cohort.length}).`, 'ok')
+        log(`Exame "${row.subject}" adicionado à coorte (${state.cohort.length})${row.controle ? ' como CONTROLE para a calibração do sítio' : ''}.`, 'ok')
+        if ($('coorte-controle')) $('coorte-controle').checked = false
         break
       }
       case 'cohort-csv': saveBlob(cohortCSV(), 'coorte_volumes.csv', 'text/csv;charset=utf-8'); break
@@ -2374,6 +2590,91 @@ async function handleExport (kind) {
   } catch (e) {
     log('Erro na exportação: ' + e.message, 'err')
   }
+}
+
+// ---------- recentragem pelo método (nível A) ----------
+// os coeficientes (models/normative/recentragem_synthseg.json) vêm de controles saudáveis medidos
+// com o MESMO SynthSeg do app (volume suave); só valem para essa medida
+async function carregarRecentragem () {
+  try {
+    const r = await fetch('./models/normative/recentragem_synthseg.json')
+    if (!r.ok) return
+    state.recentragem = await r.json()
+    let pref = null
+    try { pref = localStorage.getItem('segmentarm_recentragem_ativa') } catch { /* modo privado */ }
+    state.recentragemPreferida = pref == null ? !!state.recentragem.ativoPorPadrao : pref === '1'
+    const cb = $('opt-recentragem')
+    if (cb) {
+      $('recentragem-wrap').hidden = false
+      cb.checked = state.recentragemPreferida
+      cb.onchange = () => {
+        state.recentragemPreferida = cb.checked
+        try { localStorage.setItem('segmentarm_recentragem_ativa', cb.checked ? '1' : '0') } catch { /* modo privado */ }
+        atualizarRecentragem()
+        atualizarCalibracao()
+        updateNorms()
+      }
+    }
+    atualizarRecentragem()
+  } catch { /* sem recentragem: z crus contra as normas */ }
+}
+
+// a recentragem só se aplica quando a medida do paciente é a mesma dos controles de referência
+function atualizarRecentragem () {
+  const t = state.recentragem
+  const origemOk = !!(t && state.stats && state.stats.volumeSoft && /SynthSeg/i.test(state.modelUsed || ''))
+  state.recentragemAtiva = !!(t && state.recentragemPreferida && origemOk)
+  const wrap = $('recentragem-wrap')
+  if (wrap && t) wrap.title = `${t.fonte || ''} — n = ${t.n || '?'}; idades ${(t.idadeFaixa || []).join('–')}. ${t.metodo || ''}` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)')
+}
+
+// ---------- calibração do sítio (nível C) ----------
+function controlesDoProtocolo () {
+  const fam = state.protocolo && state.protocolo.familia
+  if (!fam) return []
+  return state.cohort.map(e => e.row).filter(r => +r.controle === 1 && r.protocolo_familia === fam)
+}
+
+// escolhe a calibração deste protocolo (no mesmo modo — com ou sem recentragem) e atualiza o painel
+function atualizarCalibracao () {
+  const fam = state.protocolo && state.protocolo.familia
+  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null)
+  const el = $('calib-status')
+  if (!el) return
+  const n = controlesDoProtocolo().length
+  $('calib-calcular').disabled = !fam || n < N_MIN_DESLOCAMENTO
+  $('calib-exportar').disabled = !Object.keys(lerCalibracoes()).length
+  if (!fam) { el.textContent = 'Sem exame carregado.'; return }
+  const c = state.calibracao
+  el.textContent = `Protocolo deste exame: ${state.protocolo.familiaTxt} (família ${fam}). Controles deste protocolo na coorte: ${n}` +
+    (n < N_MIN_DESLOCAMENTO ? ` (mínimo ${N_MIN_DESLOCAMENTO}).` : '.') +
+    (c ? ` Calibração ativa: n = ${c.n} (${c.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}), criada em ${c.criada}.` + resumoControles(c)
+      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null) ? ' A calibração guardada foi feita com outra versão da recentragem pelo método — recalcule-a com os controles.'
+        : ' Sem calibração: os z deste exame saem com o selo "não calibrado para este sítio".') +
+    (state.protocolo.semDicom ? ' Atenção: entrada sem cabeçalho DICOM — o protocolo não pôde ser identificado.' : '')
+}
+
+// checagem da calibração: z dos controles locais contra a norma, ANTES do ajuste (média ~0 e
+// DP ~1 = sítio compatível com a norma; |r| com a idade alto = deslocamento que muda com a idade)
+function resumoControles (c) {
+  const es = Object.values(c.estruturas || {}).filter(e => e && isFinite(e.media))
+  if (!es.length) return ''
+  const f = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2).replace('.', ',')
+  const med = es.map(e => e.media); const dps = es.map(e => e.dp).filter(isFinite)
+  const rs = es.map(e => Math.abs(e.corrIdade)).filter(isFinite)
+  return ` Controles × norma antes do ajuste (${es.length} medidas): z médio de ${f(Math.min(...med))} a ${f(Math.max(...med))}` +
+    (dps.length ? `; DP de ${Math.min(...dps).toFixed(2).replace('.', ',')} a ${Math.max(...dps).toFixed(2).replace('.', ',')}` : '') +
+    (rs.length ? `; |r| com a idade até ${Math.max(...rs).toFixed(2).replace('.', ',')}` : '') + '.'
+}
+
+function calcularCalibracaoSitio () {
+  const linhas = controlesDoProtocolo()
+  if (linhas.length < N_MIN_DESLOCAMENTO) { log(`Calibração: são necessários ≥ ${N_MIN_DESLOCAMENTO} controles deste protocolo na coorte (há ${linhas.length}).`, 'err'); return }
+  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null })
+  salvarCalibracao(cal)
+  log(`Calibração do sítio calculada com ${cal.n} controles (${cal.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}).` + (cal.avisos.length ? ' Avisos: ' + cal.avisos.join(' ') : ''), 'ok')
+  atualizarCalibracao()
+  updateNorms()
 }
 
 function cohortCSV () {
@@ -2395,7 +2696,9 @@ function persistCohort () {
 }
 function renderCohort () {
   const n = state.cohort.length
-  $('queue').textContent = n ? `${n} exame(s) na coorte: ${state.cohort.map(e => e.row.subject).join(', ')}` : 'Coorte vazia.'
+  const nc = state.cohort.filter(e => +e.row.controle === 1).length
+  $('queue').textContent = n ? `${n} exame(s) na coorte${nc ? ` (${nc} controle(s))` : ''}: ${state.cohort.map(e => e.row.subject + (+e.row.controle === 1 ? ' [controle]' : '')).join(', ')}` : 'Coorte vazia.'
+  try { atualizarCalibracao() } catch { /* painel ainda não montado */ }
   document.querySelector('[data-export="cohort-csv"]').disabled = !n
   document.querySelector('[data-export="cohort-sav"]').disabled = !n
   document.querySelector('[data-export="cohort-clear"]').hidden = !n
@@ -2512,7 +2815,27 @@ function wireInputs () {
   $('filter').oninput = renderTable
   $('group-filter').onchange = renderTable
   $('subject').oninput = () => { $('stage-title').textContent = $('subject').value || 'Exame' }
-  $('age').onchange = updateNorms
+  $('age').onchange = () => { state.idadeFonte = 'digitada pelo usuário'; updateNorms() }
+  if ($('calib-calcular')) $('calib-calcular').onclick = calcularCalibracaoSitio
+  if ($('calib-exportar')) {
+    $('calib-exportar').onclick = () => {
+      const blob = new Blob([JSON.stringify(lerCalibracoes(), null, 1)], { type: 'application/json' })
+      saveBlob(blob, 'segmentarm_calibracoes_sitio.json', 'application/json')
+    }
+  }
+  if ($('calib-importar')) {
+    $('calib-importar').onchange = async (ev) => {
+      const f = ev.target.files && ev.target.files[0]
+      if (!f) return
+      try {
+        const k = importarCalibracoes(JSON.parse(await f.text()))
+        log(`Calibrações importadas: ${k}.`, k ? 'ok' : 'err')
+        atualizarCalibracao()
+        updateNorms()
+      } catch (e) { log('Arquivo de calibração inválido: ' + e.message, 'err') }
+      ev.target.value = ''
+    }
+  }
   $('sex').onchange = updateNorms
   document.querySelectorAll('[data-export]').forEach(btn => {
     btn.onclick = () => handleExport(btn.dataset.export)
@@ -2667,6 +2990,11 @@ async function main () {
     navigator.serviceWorker.register('./sw.js').catch(() => {})
   }
   window.__segrm = state // gancho de diagnóstico (console do navegador)
+  // SHA-256 dos pesos e normas (tools/manifesto_sha256.mjs) — citados no laudo e no JSON
+  fetch('./models/manifest-sha256.json').then(r => r.ok ? r.json() : null).then(m => { state.manifesto = m }).catch(() => {})
+  fetch('./models/qc_rules.json').then(r => r.ok ? r.json() : null).then(m => { state.regrasQC = m }).catch(() => {})
+  carregarAssimetria().then(() => { if (state.stats) atualizarAlertas() })
+  carregarRecentragem()
   log('SegmentaRM ' + VERSION + ' pronto. Nenhuma imagem sai do dispositivo.')
 }
 

@@ -1,0 +1,144 @@
+{
+  "versao": "1.0.0",
+  "descricao": "Regras declarativas de QC do SegmentaRM. Os limiares ficam aqui (editáveis); a lógica de cada tipo está em lib/qcrules.js. status 'provisório' = limiar escolhido por raciocínio anatômico/estatístico e ainda não calibrado em teste-reteste ou em controles do sítio.",
+  "regras": [
+    {
+      "id": "z_extremo",
+      "tipo": "z_extremo",
+      "severidade": "alerta",
+      "titulo": "Desvio extremo — provável erro de segmentação",
+      "params": {
+        "zAbs": 4
+      },
+      "mensagem": "{estrutura}: z {z}. Desvios dessa magnitude quase sempre indicam falha técnica (máscara, contraste fora do domínio, movimento).",
+      "recomendacao": "Inspecione a sobreposição antes de usar qualquer número deste exame.",
+      "capturas": [
+        "estrutura"
+      ],
+      "status": "provisório",
+      "fonte": "convenção do SegmentaRM (|z| ≥ 4)"
+    },
+    {
+      "id": "desvios_em_bloco",
+      "tipo": "desvios_em_bloco",
+      "severidade": "atencao",
+      "titulo": "Desvios em bloco — suspeite de viés de medida ou de sítio",
+      "params": {
+        "minObservados": 3,
+        "fatorEsperado": 3,
+        "fracMesmoSinal": 0.8
+      },
+      "mensagem": "{observados} de {m} medidas com |z| > 2 (por acaso, ~{esperado}); {pct}% no mesmo sentido.",
+      "recomendacao": "Desvios generalizados e concordantes são o padrão de diferença sistemática entre ferramentas (paciente × norma) ou de sítio não calibrado — calibre com controles do mesmo equipamento antes de interpretar estruturas isoladas.",
+      "capturas": [],
+      "status": "provisório",
+      "fonte": "multiplicidade: m·P(|Z| > 2)"
+    },
+    {
+      "id": "fronteira_sc_sb",
+      "tipo": "fronteira_sc_sb",
+      "severidade": "atencao",
+      "titulo": "Córtex acima e substância branca abaixo do esperado",
+      "params": {
+        "zCortexMin": 1.0,
+        "zSBMax": -0.5,
+        "idadeMin": 60
+      },
+      "mensagem": "Córtex z {zc} com substância branca z {zb} aos {idade} anos.",
+      "recomendacao": "Padrão típico de deslocamento da fronteira SC/SB (contraste da sequência, hipointensidades da SB rotuladas como cinzenta) e do viés de ferramenta: o córtex do SynthSeg é maior e a SB menor que no FreeSurfer. Confira a fronteira nos cortes abaixo.",
+      "capturas": [
+        "cerebro"
+      ],
+      "status": "provisório",
+      "fonte": "piloto SynthSeg × FreeSurfer (OpenNeuro, n = 32) e plano metodológico"
+    },
+    {
+      "id": "hipocampo_corno_temporal",
+      "tipo": "hipocampo_corno_temporal",
+      "severidade": "atencao",
+      "titulo": "Hipocampo grande com corno temporal dilatado",
+      "params": {
+        "zHipMin": 1.5,
+        "hocMax": 0.83,
+        "zHocMax": -2
+      },
+      "mensagem": "{lado}: hipocampo z {z} com ocupação hipocampal (HOC) {hoc}.",
+      "recomendacao": "Combinação pouco coerente anatomicamente: suspeite de supersegmentação anterior (fronteira com a amígdala) ou de absorção de líquor pelo rótulo do hipocampo.",
+      "capturas": [
+        "hipocampo"
+      ],
+      "status": "provisório",
+      "fonte": "HOC = V_hip / (V_hip + V_corno_temporal). Com a referência do mesmo método (SynthSeg 1.0 do SegmentaRM em controles do DLBS, models/normative/referencia_mesmo_metodo.json), o corte é z da HOC ≤ −2 para a idade; sem ela, o corte provisório fixo 0,83 (corno ≥ 20% do hipocampo)."
+    },
+    {
+      "id": "idade_borda",
+      "tipo": "idade_borda",
+      "severidade": "info",
+      "titulo": "Idade na borda da norma",
+      "params": {
+        "anos": 5
+      },
+      "mensagem": "{normas}: idade a menos de {anos} anos do limite (ou além).",
+      "recomendacao": "Na borda da distribuição a mediana e a dispersão da norma são instáveis — os z dessas famílias aparecem em cinza.",
+      "capturas": [],
+      "status": "validado",
+      "fonte": "faixa de treino declarada por cada norma"
+    },
+    {
+      "id": "recentragem_fora_do_dominio",
+      "tipo": "recentragem_fora_do_dominio",
+      "severidade": "info",
+      "titulo": "Recentragem ajustada em outro equipamento",
+      "params": {},
+      "mensagem": "A recentragem pelo método (nível A) foi ajustada em controles de {dominio}; este exame: {difs}.",
+      "recomendacao": "O desvio entre o SynthSeg e a norma depende do contraste da sequência (fronteira cinzenta/branca) e pode não ser o mesmo neste equipamento — num conjunto externo de adultos jovens de outro scanner, a recentragem deixou desvios de até ~1,5 DP (pálido) em algumas estruturas. Enquanto o sítio não for calibrado com controles locais (nível C), trate desvios pequenos (|z| < 2) com cautela.",
+      "capturas": [],
+      "status": "validado",
+      "fonte": "domínio declarado na recentragem (models/normative/recentragem_synthseg.json)"
+    },
+    {
+      "id": "confianca_baixa",
+      "tipo": "confianca_baixa",
+      "severidade": "atencao",
+      "titulo": "Índice de confiança interno baixo",
+      "params": {
+        "corte": 0.65
+      },
+      "mensagem": "Grupos abaixo de {corte}: {grupos}.",
+      "recomendacao": "O índice é interno e não validado; use-o para priorizar a inspeção visual desses grupos.",
+      "capturas": [
+        "cerebro"
+      ],
+      "status": "provisório",
+      "fonte": "corte do regressor do SynthSeg 2.0 (Billot et al., PNAS 2023), aqui só como referência"
+    },
+    {
+      "id": "vic_aviso",
+      "tipo": "vic_aviso",
+      "severidade": "atencao",
+      "titulo": "Volume intracraniano com aviso",
+      "params": {},
+      "mensagem": "{aviso}",
+      "recomendacao": "O % do VIC e qualquer ajuste por VIC deste exame ficam pouco confiáveis.",
+      "capturas": [],
+      "status": "validado",
+      "fonte": "avisos do registro afim (lib/icv.js)"
+    },
+    {
+      "id": "assimetria_extrema",
+      "tipo": "assimetria_extrema",
+      "severidade": "atencao",
+      "titulo": "Assimetria fora do intervalo de referência",
+      "params": {
+        "zAbs": 3
+      },
+      "mensagem": "{estruturas}.",
+      "recomendacao": "Assimetrias extremas com sinais opostos em estruturas vizinhas sugerem fronteira deslocada, não atrofia — confira nos cortes.",
+      "capturas": [
+        "estrutura"
+      ],
+      "status": "provisório",
+      "fonte": "referência de assimetria (quando disponível para a estrutura)"
+    }
+  ]
+}

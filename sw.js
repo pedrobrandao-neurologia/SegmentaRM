@@ -1,7 +1,7 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v26'
+const CACHE = 'segmentarm-v27'
 const SHELL = [
   './',
   './index.html',
@@ -18,8 +18,12 @@ const SHELL = [
   './lib/synthseg-core.js', './lib/tfjs-upsampling3d.js', './lib/fastsurfer-core.js',
   './lib/dkt-fusion.js', './lib/normative.js', './lib/fsl-prep.js', './lib/n4.js', './lib/icv.js',
   './fonts/inter/Inter-400.ttf', './fonts/inter/Inter-600.ttf', './fonts/inter/Inter-700.ttf', './fonts/inter/kern.json', './lib/dicom-scan.js',
+  './lib/protocolo.js', './lib/qcrules.js', './lib/calibracao.js', './lib/assimetria.js',
+  './models/qc_rules.json', './models/manifest-sha256.json',
   './models/normative/brainchart.json',
   './models/normative/subcortical.json',
+  './models/normative/erro_medida.json', './models/normative/recentragem_synthseg.json',
+  './models/normative/referencia_mesmo_metodo.json',
   './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',
   './brainchop/tensor-utils.js', './brainchop/bwlabels.js',
   './vendor/niivue.js', './vendor/tf.fesm.min.js',

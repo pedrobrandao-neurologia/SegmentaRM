@@ -6,7 +6,10 @@ dispositivo, nenhum servidor, nenhuma instalação. Converte **DICOM**, sintetiz
 a rede **SynthSeg original** ou com os modelos MeshNet do brainchop, aplica a **parcelação
 DKT da FastSurferCNN**, reconstrói **superfícies corticais** com espessura (Fischl–Dale) e
 área por região, compara os volumes com as **curvas normativas dos brain charts** por idade
-e sexo, e exporta tudo em **CSV, JSON, SPSS (.sav), PDF, NIfTI, malhas .mz3 e pacote .zip**.
+e sexo — com proveniência em cada número, intervalo de 90% do z, recentragem por controles
+medidos com o mesmo método e calibração do sítio — e exporta tudo em **CSV, JSON, SPSS (.sav),
+PDF, NIfTI, malhas .mz3 e pacote .zip**. As escolhas de método estão justificadas, item a
+item, em [`docs/plano-metodologico.md`](docs/plano-metodologico.md).
 
 > **Uso em pesquisa e ensino.** Não é dispositivo médico, não tem registro ANVISA e não
 > substitui leitura radiológica. Confira a segmentação sobre a imagem antes de usar qualquer número.
@@ -38,8 +41,9 @@ Arquivo .nii/.nii.gz ───────────────────�
                  05 · Superfícies (recon-all-clinical) — SDFs white/pial → colocação
                      Eq. 5 → espessura Fischl–Dale · χ de Euler · norm · talairach.xfm
                                         ▼
-     Estatísticas: volumes, % do encéfalo, hemisférios, lobos, assimetria,
-     comparação normativa (percentil/z por idade e sexo) e tabela estilo aparc.stats
+     Estatísticas: volumes suaves (rígidos como auditoria), % do encéfalo e do VIC,
+     hemisférios, lobos, assimetria (z contra controles do mesmo método), comparação
+     normativa (z com IC 90%, recentragem pelo método, calibração do sítio), alertas de QC
                                         ▼
          CSV · JSON · SPSS .sav · PDF · NIfTI (.nii.gz) · malhas .mz3 · .zip · coorte
 ```
@@ -270,11 +274,12 @@ do regressor oficial** do SynthSeg 2.0 (extraídos de `synthseg_qc_labels_2.0.np
 | **coesão** | fragmentação / ilhas espúrias | fração dos voxels de cada estrutura no seu maior componente conexo (6-vizinhança), agregada ao grupo por volume |
 | **simetria** | perda unilateral | 1 − excesso de assimetria E/D (\|IA\| até 10% não penaliza, 40% zera); grupos medianos ficam de fora |
 
-`escore = confiança × coesão × simetria` — multiplicativo, para que uma única falha
-derrube o grupo. Os três componentes vão **separados** no CSV/JSON justamente para você
-recalibrar o corte na sua coorte. **O escore não é o Dice predito pelo regressor
-oficial**: é outra grandeza, em outra escala; o 0,65 do artigo (Billot et al., *PNAS*
-2023) entra só como referência de partida.
+`índice = confiança × coesão × simetria` — multiplicativo, para que uma única falha
+derrube o grupo. No laudo ele se chama **índice de confiança interno (não validado)**: não é
+o Dice predito pelo regressor oficial, é outra grandeza, em outra escala, e o 0,65 do artigo
+(Billot et al., *PNAS* 2023) entra só como referência de partida até um corte próprio ser
+calibrado em teste-reteste. Os três componentes vão **separados** no CSV/JSON justamente
+para você recalibrar o corte na sua coorte.
 
 Validação (fantomas + uma segmentação SynthSeg **real** progressivamente degradada):
 
@@ -287,6 +292,23 @@ Validação (fantomas + uma segmentação SynthSeg **real** progressivamente deg
 | 12% | 0,914 | 0,464 | 3 |
 
 Perda unilateral de metade de um hemisfério derruba a pior simetria de 1,000 para 0,099.
+
+**Alertas de QC por regras.** Além do índice, `models/qc_rules.json` declara regras de
+plausibilidade e coerência (motor em `lib/qcrules.js`), cada uma com severidade, fonte e
+status (provisória/validada):
+
+- |z| ≥ 4 (provável erro de segmentação);
+- desvios em bloco no mesmo sentido (viés de ferramenta ou de sítio);
+- córtex acima e SB abaixo do esperado em idosos (fronteira cinzenta/branca);
+- hipocampo grande com ocupação hipocampal baixa para a idade (HOC contra controles do mesmo método);
+- idade na borda da norma;
+- recentragem ajustada em outro equipamento (fabricante ou campo diferente do DLBS);
+- índice de confiança baixo;
+- VIC com aviso;
+- assimetria extrema (z do IA).
+
+Quando uma regra dispara, o PDF ganha uma página de **alertas** com cortes da sobreposição
+escolhidos pela regra (hipocampo, polo occipital, cérebro inteiro).
 O mapa de confiança também é exportável (`.nii.gz`, 0–255) e visualizável a um clique na
 linha do tempo. Só o **SynthSeg** devolve posteriores; com os modelos MeshNet o
 componente de confiança fica neutro e a proveniência declara isso.
@@ -377,43 +399,126 @@ crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covari�
 
 ## Comparação normativa (QC, não clínico)
 
-Informando **idade e sexo**, os volumes são comparados com as curvas populacionais dos
-**brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
-[brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e
-vendorizados em `models/normative/brainchart.json`): **percentil e z-score do previsto**
-para volumes globais, **volume cortical por lobo** (E/D e total, após o passo DKT) e
-parcelas DKT individuais. |z| ≥ 3 marca achado atípico; **|z| ≥ 4 vira alerta de possível
-erro de segmentação** no painel e no PDF. As normas foram ajustadas em volumes FreeSurfer;
-os daqui vêm do SynthSeg/DKT — aproximação para triagem, não para uso clínico.
+Informando **idade e sexo** (lidos do DICOM quando há: a idade é calculada pela **data do
+exame**, não pela do processamento), os volumes são comparados com duas famílias de normas:
 
-**Estruturas subcorticais regionais.** Tálamo, caudado, putâmen, pálido, hipocampo,
-amígdala e accumbens, por **hemisfério e sexo**, são comparados com os modelos GAMLSS do
-**CentileBrain** (Ge et al., *Lancet Digit Health* 2024; grupo ENIGMA Lifespan de Dima et
-al., *Hum Brain Mapp* 2022; ~36 mil controles, 3–90 anos, FreeSurfer aseg harmonizado por
-ComBat-GAM). Os centis foram tirados offline dos modelos oficiais
-(`tools/extract_centilebrain_subcortical.R` → `models/normative/subcortical.json`) e o JS
-reproduz o R com erro de z ≤ 0,003 entre P5 e P95. Ressalvas: o SynthSeg difere do aseg de
-forma sistemática por estrutura (o z pode ter viés), não há ajuste por volume intracraniano
-e o exame isolado não passa pela harmonização do treino. O repositório CentileBrain não traz
-licença explícita (apenas "for research purpose"); os centis são redistribuídos aqui para
-pesquisa, com citação — confirme com os autores antes de uso comercial.
+- **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos, cérebro total), com as
+  curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
+  [brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e
+  vendorizados em `models/normative/brainchart.json`);
+- **estruturas subcorticais por hemisfério e sexo** (tálamo, caudado, putâmen, pálido,
+  hipocampo, amígdala, accumbens), com os modelos do **CentileBrain** (Ge et al., *Lancet
+  Digit Health* 2024; ENIGMA Lifespan; ~37 mil controles, 3–90 anos, FreeSurfer aseg
+  harmonizado por ComBat-GAM). Os centis vêm de `tools/extract_centilebrain_subcortical.R`
+  (→ `models/normative/subcortical.json`); o JS reproduz o R com erro de z < 0,01 entre P5 e
+  P95. O repositório CentileBrain não traz licença explícita (apenas "for research
+  purpose"): os centis são redistribuídos para pesquisa, com citação — confirme com os
+  autores antes de uso comercial.
+
+Cada tabela leva um **selo de proveniência**:
+
+- a norma e a ferramenta com que ela foi medida;
+- a ferramenta e o tipo de volume do paciente;
+- se o z foi recentrado por controles do mesmo método;
+- se o sítio está calibrado;
+- a faixa etária da norma.
+
+A menos de 5 anos do limite da norma, z e percentil ficam **em cinza** (estimativa instável).
+Percentis extremos aparecem como "< 1", "< 0,1", "> 99" e "> 99,9". **Não há z por lobo**:
+não existe norma lobar própria, e somar médias e DP de parcelas não é um modelo. O z por
+parcela DK fica só no JSON, como exploratório.
+
+**Multiplicidade.** O painel e o PDF dizem quantos |z| > 2 se esperam por acaso (m·4,55%) e
+quantos foram observados. Os achados que sobrevivem à correção de Holm (α 5%, p bicaudal)
+levam *; as estruturas pré-especificadas levam • (hipocampo, amígdala, tálamo, putâmen,
+ventrículos). Muitos desvios no mesmo sentido disparam o alerta de **desvios em bloco**:
+é o padrão de viés entre ferramentas ou de sítio não calibrado, não de biologia.
+
+**Intervalo de 90% do z.** Cada z vem com um IC 90% que soma, em quadratura, três fontes:
+
+- o **erro de medida** publicado para o SynthSeg (`models/normative/erro_medida.json`):
+  - van Nederpelt et al., *Neuroradiology* 2023 — EPM intra e entre scanners do SynthSeg 1.0 e ICC por estrutura;
+  - Kondrateva et al., arXiv 2025 — variação entre scanners, conservadora;
+  - vale o erro **entre scanners enquanto o sítio não estiver calibrado**;
+- a incerteza da **recentragem pelo método**;
+- a incerteza da **calibração**.
+
+Não inclui a incerteza do próprio modelo normativo, que as normas não publicam de forma
+utilizável — na borda etária o intervalo real é maior.
+
+**Recentragem pelo método (nível A).** As normas são de volumes FreeSurfer, e o SynthSeg
+difere dele por estrutura, e de forma grande: o córtex fica ~14–23% acima (mais nos idosos) e a
+SB ~9% abaixo.
+Sem correção, isso desloca os z de estruturas inteiras.
+
+A correção óbvia — traduzir o volume para a escala do FreeSurfer — **não funciona** com essas
+normas. Controles saudáveis medidos pelo próprio FreeSurfer ficam, em média, 1,5 DP (FreeSurfer
+5.3 do DLBS) e 1,9 DP (FreeSurfer 6.0.1 de outro conjunto) abaixo da GMV do BrainChart.
+Traduzir para essa escala criaria atrofia cortical em quem não tem.
+
+Por isso o app recentra o z contra a **própria norma**. Controles saudáveis do **Dallas
+Lifespan Brain Study** (OpenNeuro ds004856, CC0; 21–89 anos), medidos com o **mesmo SynthSeg
+do app**, definem, por estrutura, o desvio médio do z em função da idade e do sexo:
+
+```
+z' = z − (a + c·t + d·t² + e·[M]),   t = idade − 60
+```
+
+- os coeficientes ficam em `models/normative/recentragem_synthseg.json`;
+- a escala do z continua a da norma;
+- a incerteza do deslocamento vai para o IC 90%;
+- a coluna "Mediana" passa a ser a esperada para o mesmo método.
+
+A recentragem liga por padrão com o SynthSeg (volume suave) e pode ser desligada no painel;
+cada linha mostra também o z sem recentragem.
+
+Validação completa em [`docs/validacao/dlbs.md`](docs/validacao/dlbs.md), em controles
+saudáveis:
+
+- no DLBS, em validação cruzada, o z médio fica perto de 0 em todos os terços de idade — no
+  terço mais velho (> 76 anos), o |z| médio cai de 0,83 para 0,07;
+- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,43.
+
+O que sobra é efeito de sítio. Por isso, quando o equipamento difere do DLBS (Philips 3 T
+MPRAGE), o laudo recomenda a calibração local.
+
+**Calibração do sítio (nível C).** Exames marcados como **controle** na coorte, do mesmo
+protocolo, calibram os z daquele protocolo. A família de protocolo é um SHA-256 dos campos
+técnicos do DICOM, sem identificadores. A regra depende do número de controles:
+
+- com ≥ 30, desloca e reescala (escala limitada a 0,5–2);
+- com 10–29, só desloca;
+- com menos de 10, não aplica.
+
+O painel mostra, **antes do ajuste**, a média e o DP dos z dos controles e a correlação com
+a idade. A calibração fica no navegador e pode ser exportada e importada em JSON. Sem ela,
+todas as tabelas dizem "**não calibrado para este sítio**".
+
+**Assimetria e ocupação hipocampal do mesmo método.** O z do índice de assimetria e o da
+ocupação hipocampal (HOC = V_hip / (V_hip + V_corno temporal)) são calculados contra
+controles do DLBS medidos **com o mesmo SynthSeg do app**, com média e DP por idade
+(`models/normative/referencia_mesmo_metodo.json`). Parcelas corticais DKT não têm essa
+referência: o IA delas é descritivo, sem z e sem cor. O antigo corte fixo |IA| > 10% saiu.
 
 **DKT × normas DK.** As normas regionais dos brain charts são do atlas **DK**; o protocolo
 **DKT** (Klein & Tourville, *Front Neurosci* 2012) eliminou bankssts, frontalpole e
-temporalpole, cujo tecido foi absorvido pelas regiões adjacentes sem partilha definida.
-Com parcelação DKT, as parcelas DK adjacentes a elas (temporal superior, médio e
-inferior, entorrinal, parietal inferior, supramarginal, frontal superior, frontal médio
-rostral, orbitofrontais medial e lateral) saem **sem z** ("sem norma comparável"), em vez
-de um z inflado; nos **lobos**, as normas das regiões eliminadas são somadas ao lobo que
-as absorveu (temporal: bankssts + temporalpole; frontal: frontalpole), e aí a comparação
-continua válida.
+temporalpole, cujo tecido foi absorvido pelas regiões adjacentes sem partilha definida. Com
+parcelação DKT, as parcelas DK vizinhas saem **sem z** ("sem norma comparável"), em vez de
+um z inflado.
 
 ### Convenções dos números exportados
 
+- **Volume principal:** com o SynthSeg, o **volume suave** (soma das posteriores na grade da
+  rede, a convenção do `--vol` oficial); a contagem de voxels (volume rígido) fica como
+  auditoria (`volume_rigido_mm3`, `metodo_volume`, `dif_suave_rigido_pct` — a diferença
+  suave − rígido é um indicador de incerteza de fronteira). Parcelas DKT: o córtex suave de
+  cada hemisfério é redistribuído na proporção do volume rígido das parcelas. Redes sem
+  posteriores (MeshNet) continuam com o rígido.
 - **Índice de assimetria:** `IA = 200·(E − D)/(E + D)`, em %. **Positivo = esquerda maior**,
   negativo = direita maior, 0 = simetria (faixa −200 a +200). Calculado para cada par E/D com
-  o mesmo nome-base (`Left-`/`Right-`, `ctx-lh-`/`ctx-rh-`), sobre o volume por contagem de
-  voxels. A convenção vai também no JSON (`convencao_assimetria`), nos rótulos do SPSS e no PDF.
+  o mesmo nome-base (`Left-`/`Right-`, `ctx-lh-`/`ctx-rh-`), sobre o volume principal; o
+  `z_assimetria` vem da referência do mesmo método, quando há. A convenção vai também no JSON
+  (`convencao_assimetria`), nos rótulos do SPSS e no PDF.
 - **Parcelas ausentes no DKT:** o protocolo DKT (Klein & Tourville 2012) eliminou `bankssts`,
   `frontalpole` e `temporalpole` (absorvidos pelas regiões vizinhas). Com a parcelação DKT elas
   não aparecem nas tabelas nem nas exportações (em vez de linhas com volume zero); o JSON
@@ -423,9 +528,16 @@ continua válida.
 ## Exportações
 
 - **CSV** longo (estrutura/agregado/lobo/assimetria/VIC/espessura volumétrica; decimal
-  configurável; coluna `pct_vic`)
-- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria, VIC,
-  qualidade, proveniência do pré-processamento, normativo, espessura, ressalvas)
+  configurável; colunas `pct_vic`, `volume_rigido_mm3`, `metodo_volume`,
+  `dif_suave_rigido_pct` e `z_assimetria`)
+- **JSON** completo. Traz:
+  - estruturas com centroide RAS, agregados, lobos, assimetria com z, VIC, qualidade e proveniência do pré-processamento;
+  - normativo com `proveniencia`, `multiplicidade`, `ic90` e `incerteza` por z;
+  - `alertas_qc` e `ocupacao_hipocampal`;
+  - `aquisicao`: fabricante, campo, sequência, TR/TE/TI, correção de distorção;
+  - `protocolo` (família) e `idade_fonte`;
+  - `reprodutibilidade`: SHA-256 dos pesos, normas, recentragem e referências usados, e versão do app;
+  - espessura e ressalvas
 - **SPSS `.sav`** — escritor próprio (nomes longos, rótulos em português UTF-8), incluindo
   `eTIV` e `thick_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
 - **PDF** — laudo diagramado no estilo Apple (hierarquia por peso e tamanho, cartões
@@ -445,7 +557,7 @@ continua válida.
 **Lobos.** As parcelas DKT são agrupadas em cinco lobos — frontal, temporal, parietal,
 occipital e ínsula —, com o cíngulo distribuído como nos lobos "estritos" do FreeSurfer:
 cíngulo anterior (rostral e caudal) no frontal, cíngulo posterior e istmo no parietal. A
-mesma convenção vale para os volumes por lobo do CSV/JSON e para as normas por lobo.
+mesma convenção vale para os volumes por lobo do CSV/JSON (sem z por lobo: não há norma lobar).
 
 **Espessura cortical volumétrica nas exportações.** A espessura por região DKT (passo 05)
 sai no CSV (linhas `espessura_volumetrica`), no JSON, no `.sav`/coorte (`thick_*`) e no PDF,
@@ -458,11 +570,13 @@ nas ressalvas e num cartão no topo da página de espessura do PDF. A malha 3D c
 das exportações.
 - **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, MP-RAGE
   sintético, máscara, cérebro extraído, **norm sintético**) em `.nii.gz`
-- **QC `.csv`** — escore, confiança, coesão e simetria por grupo tecidual (uma linha por
-  exame, na forma do `synthseg.qc.csv`) + mapa de confiança da rede em `.nii.gz`
+- **QC `.csv`** — índice de confiança interno (não validado), confiança, coesão e simetria
+  por grupo tecidual (uma linha por exame, na forma do `synthseg.qc.csv`) + mapa de
+  confiança da rede em `.nii.gz`
 - **`talairach.xfm`** — transformada linear para o MNI (formato MNI Transform File)
 - **Malhas** — white/pial em `.mz3` dentro do `.zip` (com o xfm e o norm)
 - **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav`
+  (com idade, sexo, família do protocolo e a marca de **controle** usada na calibração do sítio)
 
 ### Usar no R
 
@@ -486,6 +600,15 @@ python3 -m http.server 8080     # http://localhost:8080
 Tudo (NiiVue, dcm2niix WASM, TensorFlow.js, modelos, fontes) está vendorizado; não há CDN.
 
 O botão **Exemplo** carrega um T1 real 256³ (do brain2print, MIT) para demonstrar o fluxo.
+
+**Testes** (Node ≥ 20):
+
+```bash
+npm install                  # playwright-core (usa o Chromium instalado)
+npm test                     # unidade: normas × R, Holm, IC 90%, recentragem, calibração, DICOM, PDF
+npm run test:navegador       # interface no Chromium, com inferência simulada
+npm run test:golden          # exames de referência com o pipeline real (tests/golden/README.md)
+```
 Após uma atualização do aplicativo, recarregue a página duas vezes (o service worker troca
 o cache na segunda visita).
 
@@ -504,7 +627,10 @@ lib/sdf-surface.js                     recon-clinical: SDFs, partição E/D, Eq.
 lib/segqc.js                           QC por grupo tecidual (confiança, coesão, simetria)
 lib/dkt-fusion.js                      fusão parcelação→córtex (esquema do predict_synthseg)
 lib/surfaces.js                        EDT, surface nets, Taubin, áreas, MZ3
-lib/normative.js                       percentil/z contra os brain charts
+lib/normative.js                       percentil/z, proveniência, IC 90%, recentragem, multiplicidade
+lib/calibracao.js · lib/protocolo.js   calibração do sítio (nível C) e família do protocolo (DICOM)
+lib/qcrules.js · models/qc_rules.json  alertas de QC declarativos e alvos de captura
+lib/assimetria.js                      z da assimetria e da HOC contra controles do mesmo método
 lib/stats.js · lib/labels.js           volumetria, lobos, assimetria, nomes em pt-BR
 lib/sav.js · lib/pdf.js · lib/report.js  SPSS, PDF e relatório
 lib/nifti-writer.js · lib/zip.js       NIfTI-1 e ZIP
@@ -523,6 +649,10 @@ models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts d
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/normative/subcortical.json      centis subcorticais (CentileBrain)
+models/normative/recentragem_synthseg.json    recentragem do z pelo método (controles do DLBS)
+models/normative/referencia_mesmo_metodo.json assimetria e HOC por idade (DLBS, SynthSeg do app)
+models/normative/erro_medida.json      teste-reteste por estrutura (IC 90% do z)
+models/manifest-sha256.json            SHA-256 dos pesos/normas (reprodutibilidade)
 lib/icv.js · workers/icv.worker.js    volume intracraniano (eTIV) por registro afim ao MNI152
 models/model*/                         MeshNet do brainchop (MIT)
 tools/convert_synthseg1_tfjs.py        conversor SynthSeg (reprodutível)
@@ -530,6 +660,12 @@ tools/convert_synthsr_tfjs.py          conversor SynthSR (reprodutível)
 tools/convert_synthsurf_tfjs.py        conversor SynthDist (traga-seus-pesos do FreeSurfer)
 tools/convert_synthseg2_tfjs.py        conversor SynthSeg 2.0: S1/denoiser/S2, parc e QC (traga-seus-pesos)
 tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, sem torch)
+tools/synthseg_node.mjs · tools/lote_synthseg_node.mjs  o SynthSeg do app em Node (lote offline)
+tools/dlbs_selecao.py · tools/referencias_dlbs.py      seleção do DLBS, referências do mesmo método, comparação com o FreeSurfer
+tools/recentragem_dlbs.mjs             recentragem do z (nível A) com as normas do app + relatório
+tools/manifesto_sha256.mjs             regenera models/manifest-sha256.json
+tests/unit/ · tests/browser/ · tests/golden/  testes (Node, Chromium) e exames de referência
+docs/                                  plano metodológico e validação
 licenses/                              licenças e proveniência dos pesos
 vendor/                                NiiVue, dcm2niix WASM, TensorFlow.js, fontes
 sw.js · manifest.webmanifest           PWA offline
