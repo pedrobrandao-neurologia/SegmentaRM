@@ -115,7 +115,12 @@ Keras). O pipeline reproduz o `predict_synthseg.py` oficial passo a passo
   **limite de textura da GPU**: 128³ quando ela aceita texturas de 16384² (a maioria das
   placas dedicadas e das integradas recentes) e 96³ quando o limite é 8192² — com 128³ a
   maior ativação da rede não cabe nessas GPUs. Com 96³ a paridade medida no T1 cai de
-  0,998 para 0,992 de Dice médio e o número de blocos sobe (~45 contra ~12);
+  0,998 para 0,992 de Dice médio e o número de blocos sobe (~45 contra ~12). No volume, o
+  efeito é sistemático: no exame de exemplo, contra 128³, o córtex cerebelar cai 7%, o
+  pálido sobe até 2,8% e o tálamo e os ventrículos caem cerca de 1%. Blocos de 160³ e 192³
+  ficam a menos de 1% de 128³ ([`tests/golden/README.md`](tests/golden/README.md)). Como a
+  recentragem foi medida com 128³, o laudo registra o bloco usado e avisa quando ele é
+  menor (regra `bloco_reduzido`);
 - robustez na GPU: o espelhamento é feito em JavaScript (a WebGL não tem `reverse` de
   tensor 5D), os 3 maiores posteriores são calculados na GPU (só 6 números por voxel descem
   da placa), a perda do contexto WebGL vira erro claro em vez de espera infinita, e o

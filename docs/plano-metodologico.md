@@ -36,6 +36,17 @@ no principal, e falha acima da tolerância. Há dois motores:
 - o **navegador**, com o app completo; é lento sem GPU;
 - o **Node**, com o mesmo `lib/synthseg-core.js` e TensorFlow nativo, em ~2–5 min por exame.
 
+A equivalência entre os dois foi medida num bloco real do exemplo (`tests/golden/motores.mjs`):
+
+- com WebGL de 32 bits e com o backend CPU do navegador, o rótulo coincide com o do Node em
+  100% dos voxels, e o volume suave difere em menos de 0,0001%;
+- com texturas de 16 bits, a diferença fica abaixo de 0,2% por estrutura.
+
+O que muda o volume é o **tamanho do bloco**. Com 96³ — memória baixa, ou GPU com texturas de
+até 8192² —, o córtex cerebelar cai 7% e o pálido sobe até 2,8% em relação a 128³, o tamanho
+com que o DLBS foi medido. Blocos de 160³ e 192³ ficam a menos de 1% de 128³. O laudo registra
+o bloco e avisa quando ele é menor (regra `bloco_reduzido`).
+
 Veja [`tests/golden/README.md`](../tests/golden/README.md).
 
 *Diferença antes → depois desta versão.* Os rótulos não mudaram: `lib/synthseg-core.js`, os
@@ -195,7 +206,8 @@ al., *Sci Data* 2025) — 201 controles de 21 a 89 anos —, com T1 público e v
 FreeSurfer 5.3 **editados à mão e revisados por outra equipe**:
 
 - seleção estratificada por década, com idosos sobre-representados (`tools/dlbs_selecao.py`);
-- SynthSeg do app em lote (`tools/lote_synthseg_node.mjs`);
+- SynthSeg do app em lote (`tools/lote_synthseg_node.mjs`), com blocos de 128³ — dá o mesmo
+  volume que o app no navegador com o mesmo bloco (medido em `tests/golden/README.md`);
 - preparação e comparação com o FreeSurfer em `tools/referencias_dlbs.py`;
 - ajuste da recentragem, com o código e as tabelas do próprio app, em `tools/recentragem_dlbs.mjs`.
 

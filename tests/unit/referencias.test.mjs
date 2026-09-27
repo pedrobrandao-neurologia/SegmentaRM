@@ -64,6 +64,17 @@ test('recentragem fora do domínio: avisa em outro fabricante/campo; cala com o 
   assert.ok(!cal.some(a => a.id === 'recentragem_fora_do_dominio'))
 })
 
+test('bloco reduzido: avisa abaixo de 128³ (GPU ou memória baixa); cala com 128³ ou sem a informação', () => {
+  const gpu = avaliarRegras(regras, { segmentacao: { bloco: { usado: 96, pedido: 128 } } })
+  const a = gpu.find(x => x.id === 'bloco_reduzido')
+  assert.ok(a && /96³/.test(a.mensagem) && /textura/.test(a.mensagem) && /128³/.test(a.mensagem))
+  const mem = avaliarRegras(regras, { segmentacao: { bloco: { usado: 96, pedido: 96 } } })
+  assert.ok(mem.some(x => x.id === 'bloco_reduzido' && /memória baixa/.test(x.mensagem)))
+  assert.ok(!avaliarRegras(regras, { segmentacao: { bloco: { usado: 128, pedido: 128 } } }).some(x => x.id === 'bloco_reduzido'))
+  assert.ok(!avaliarRegras(regras, { segmentacao: { bloco: null } }).some(x => x.id === 'bloco_reduzido'))
+  assert.ok(!avaliarRegras(regras, {}).some(x => x.id === 'bloco_reduzido'))
+})
+
 test('arquivos de referência embarcados: formato que o app lê', () => {
   for (const [arq, chk] of [
     ['models/normative/referencia_mesmo_metodo.json', (d) => d.assimetria && d.assimetria.estruturas.Hippocampus && d.hoc && d.hoc.lados.E && d.idadeFaixa],

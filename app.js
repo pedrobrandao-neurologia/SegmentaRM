@@ -66,6 +66,7 @@ const state = {
   synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
   segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
   segVolSoft: null,    // Float64Array — volume soft por canal do SynthSeg (voxels; soma dos posteriors, como o --vol oficial)
+  segBloco: null,      // { usado, pedido } — lado do bloco do SynthSeg (a recentragem foi medida com 128)
   qc: null,            // { grupos, estruturas, resumo } — QC por grupo tecidual
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
@@ -859,6 +860,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.segConf = null
   state.segVolSoft = null
   state.segVolSoftUnit = null
+  state.segBloco = null
   state.labelsMap = null
   state.colormap = null
   state.stats = null
@@ -1113,6 +1115,7 @@ function runWorker (url, message, pFrom, pTo) {
         // por execução fica no início de runSegmentation.
         if (d.conf) state.segConf = new Uint8Array(d.conf)
         if (d.volumes) { state.segVolSoft = new Float64Array(d.volumes); state.segVolSoftUnit = d.volumesUnit || 'voxels' }
+        if (d.bloco) state.segBloco = { usado: d.bloco, pedido: d.blocoPedido || d.bloco }
         log(`Inferência concluída em ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok')
         resolve(new Uint8Array(d.img))
       }
@@ -2143,7 +2146,8 @@ function atualizarAlertas () {
       icv: state.icv,
       hoc: state.hoc,
       assimetria: state.assimetria || [],
-      aquisicao: aquisicaoMeta()
+      aquisicao: aquisicaoMeta(),
+      segmentacao: { bloco: state.segBloco }
     })
     : []
   renderAlertas()
@@ -2321,6 +2325,7 @@ function reprodutibilidadeMeta () {
     versaoApp: VERSION,
     manifestoGerado: state.manifesto ? state.manifesto.gerado : null,
     componentes: usados,
+    synthsegBloco: state.segBloco ? state.segBloco.usado : null,
     nota: usados.length ? null : 'manifesto de hashes indisponível nesta sessão'
   }
 }

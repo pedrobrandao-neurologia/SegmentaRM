@@ -169,11 +169,11 @@
   },
   "regras_qc": {
    "descricao": "Regras declarativas de QC",
-   "sha256": "73566f0c1d5677de620c12fbcd9bc80ddd571f84f2e250c1304462d66c988660",
+   "sha256": "58b21a76d301694bf69f34226c205002aba4df20a19e2aba3b67692b812de740",
    "arquivos": [
     {
      "arquivo": "models/qc_rules.json",
-     "sha256": "f48bcaa07fc30f9c682602d951d981ca185114f0b3428189b07deba9b99a7180"
+     "sha256": "bdbe5728d31438843075935e081fcd94d790652275778f95190d4a66861efdc0"
     }
    ]
   }
