@@ -1,0 +1,128 @@
+{
+  "versao": "1.0",
+  "descricao": "Erro de medida (teste-reteste) do SynthSeg 1.0 por estrutura, usado no intervalo de 90% do z. 'Intra' = mesmo scanner (sítio calibrado); 'entre' = entre scanners (sítio NÃO calibrado: o deslocamento do scanner entra como erro aleatório). Em % do volume (convertido para z pela inclinação local da norma) ou diretamente em unidades de z (EPM_z = √(1 − ICC), supondo variância da coorte ≈ variância normativa condicional — provavelmente SUBESTIMA o erro, porque a coorte do estudo tinha idades e graus de atrofia heterogêneos).",
+  "fontes": {
+    "vanNederpelt2023": "van Nederpelt DR, Amiri H, Brouwer I, et al. Reliability of brain atrophy measurements in multiple sclerosis using MRI: an assessment of six freely available software packages for cross-sectional analyses. Neuroradiology 2023;65(10):1459-1472. doi:10.1007/s00234-023-03189-8 (CC BY). SynthSeg 1.0, 21 pacientes com EM, 3 scanners 3T (GE, Philips, Toshiba), scan-rescan com reposicionamento. Tabela 3 (EPM intra e entre scanners, % da média); ICC de concordância absoluta por scanner (média dos 3 scanners usada aqui).",
+    "kondrateva": "Kondrateva E, Barg S, Vasiliev M. Benchmarking the Reproducibility of Brain MRI Segmentation Across Scanners and Time. arXiv:2504.15931 (2025; preprint, não revisado por pares), seção 4.1. SynthSeg do FreeSurfer 8.0.0 (versão robusta, não a 1.0) em 73 sessões de um mesmo sujeito, em vários scanners ao longo de 17 anos: hipocampo E 5,10 ± 0,11 e D 5,18 ± 0,12 cm³; amígdala E 2,13 ± 0,07 e D 2,22 ± 0,07 cm³; variação média das estruturas subcorticais 3,1%. O CV inclui o envelhecimento de 17 anos e outra versão do SynthSeg — usado como estimativa CONSERVADORA (maior) do erro entre scanners.",
+    "estimativa": "Sem medida publicada para o SynthSeg 1.0: valor conservador escolhido para não esconder a incerteza (marcado como aproximado)."
+  },
+  "fatorEntreSemMedida": 1.77,
+  "notaFatorEntre": "Quando só há o erro intra-scanner, o entre scanners é estimado × 1,77 (razão EPM entre/intra do tálamo no SynthSeg 1.0, van Nederpelt 2023: 1,75 / 0,99).",
+  "estruturas": {
+    "TCV": {
+      "intraPct": 0.45,
+      "entrePct": 1.98,
+      "fonte": "vanNederpelt2023",
+      "nota": "cérebro total"
+    },
+    "CortexVol": {
+      "intraPct": 0.45,
+      "entrePct": 1.9,
+      "fonte": "vanNederpelt2023",
+      "nota": "cinzenta total como aproximação do córtex",
+      "aproximado": true
+    },
+    "CerebralWhiteMatterVol": {
+      "intraPct": 0.6,
+      "entrePct": 2.38,
+      "fonte": "vanNederpelt2023"
+    },
+    "SubCortGrayVol": {
+      "intraPct": 0.99,
+      "entrePct": 1.75,
+      "fonte": "vanNederpelt2023",
+      "nota": "valores do tálamo (≈ 40% da cinzenta subcortical) como aproximação conservadora da soma",
+      "aproximado": true
+    },
+    "VentricleVol": {
+      "intraPct": 2.0,
+      "entrePct": 4.0,
+      "fonte": "estimativa",
+      "aproximado": true
+    },
+    "Left-Thalamus": {
+      "intraPct": 0.99,
+      "entrePct": 1.75,
+      "fonte": "vanNederpelt2023",
+      "nota": "a tabela não separa hemisférios"
+    },
+    "Right-Thalamus": {
+      "intraPct": 0.99,
+      "entrePct": 1.75,
+      "fonte": "vanNederpelt2023",
+      "nota": "a tabela não separa hemisférios"
+    },
+    "Left-Hippocampus": {
+      "intraZ": 0.143,
+      "entrePct": 2.2,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,980) + kondrateva (entre: CV 2,2%)",
+      "aproximado": true
+    },
+    "Right-Hippocampus": {
+      "intraZ": 0.183,
+      "entrePct": 2.3,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,967) + kondrateva (entre: CV 2,3%)",
+      "aproximado": true
+    },
+    "Left-Amygdala": {
+      "intraZ": 0.221,
+      "entrePct": 3.3,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,951) + kondrateva (entre: CV 3,3%)",
+      "aproximado": true
+    },
+    "Right-Amygdala": {
+      "intraZ": 0.305,
+      "entrePct": 3.2,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,907) + kondrateva (entre: CV 3,2%)",
+      "aproximado": true
+    },
+    "Left-Caudate": {
+      "intraZ": 0.058,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,997) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Right-Caudate": {
+      "intraZ": 0.063,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,996) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Left-Putamen": {
+      "intraZ": 0.103,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,989) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Right-Putamen": {
+      "intraZ": 0.108,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,988) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Left-Pallidum": {
+      "intraZ": 0.264,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,930) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Right-Pallidum": {
+      "intraZ": 0.163,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,973) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Left-Accumbens-area": {
+      "intraZ": 0.228,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,948) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    },
+    "Right-Accumbens-area": {
+      "intraZ": 0.342,
+      "entrePct": 3.1,
+      "fonte": "vanNederpelt2023 (intra: ICC 0,883) + kondrateva (entre: média subcortical 3,1%)",
+      "aproximado": true
+    }
+  }
+}

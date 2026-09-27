@@ -1,0 +1,33 @@
+{
+  "descricao": "Exames de referência do SegmentaRM (todos públicos; nenhum dado de paciente do serviço entra no repositório). Rode o seu exame-índice localmente com --exame caminho.nii.gz — a referência dele fica fora do git.",
+  "exames": [
+    {
+      "id": "exemplo",
+      "caminho": "example/t1_exemplo.nii.gz",
+      "sha256": "9f5708dd1980fe0017ad70f63d895bae66bd9f5487eb1c38d129591116113613",
+      "fonte": "exemplo do app (brain2print, MIT)",
+      "idade": null, "sexo": null
+    },
+    {
+      "id": "ds000001-sub-01",
+      "url": "https://s3.amazonaws.com/openneuro.org/ds000001/sub-01/anat/sub-01_T1w.nii.gz",
+      "sha256": "bdb7022ae229c5b8edd16425928c9243c562f84082b9b8e6f97cdba8b9354a98",
+      "fonte": "OpenNeuro ds000001 (CC0) — adulta jovem",
+      "idade": 26, "sexo": "F"
+    },
+    {
+      "id": "dlbs-sub-1225",
+      "url": "https://s3.amazonaws.com/openneuro.org/ds004856/sub-1225/ses-wave1/anat/sub-1225_ses-wave1_acq-MPRAGE_run-1_T1w.nii.gz",
+      "sha256": "b4cc15b29deb1421982567396544341e535df6eb1bded37d6acf07366c8a74f1",
+      "fonte": "Dallas Lifespan Brain Study, OpenNeuro ds004856 (CC0) — 89 anos",
+      "idade": 89, "sexo": "F"
+    },
+    {
+      "id": "dlbs-sub-2054",
+      "url": "https://s3.amazonaws.com/openneuro.org/ds004856/sub-2054/ses-wave1/anat/sub-2054_ses-wave1_acq-MPRAGE_run-1_T1w.nii.gz",
+      "sha256": "aca592c15fd711f67841eed4c8daf2d71cd07827c3145de94c5dd01fb0f59231",
+      "fonte": "Dallas Lifespan Brain Study, OpenNeuro ds004856 (CC0) — 88 anos",
+      "idade": 88, "sexo": "M"
+    }
+  ]
+}

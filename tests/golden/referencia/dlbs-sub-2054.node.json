@@ -1,0 +1,196 @@
+{
+ "modelo": "SynthSeg 1.0 (núcleo do app em Node, TensorFlow nativo)",
+ "segKind": "synthseg",
+ "volumeSuave": true,
+ "estruturas": {
+  "Left-Cerebral-White-Matter": {
+   "principal": 189871.5228225409,
+   "rigido": 187133.01357315652,
+   "suave": 189871.5228225409,
+   "metodo": "suave"
+  },
+  "Left-Cerebral-Cortex": {
+   "principal": 232798.8658910903,
+   "rigido": 245929.01783775608,
+   "suave": 232798.8658910903,
+   "metodo": "suave"
+  },
+  "Left-Lateral-Ventricle": {
+   "principal": 19525.241923271904,
+   "rigido": 19853.00143998053,
+   "suave": 19525.241923271904,
+   "metodo": "suave"
+  },
+  "Left-Inf-Lat-Vent": {
+   "principal": 1167.3919595652892,
+   "rigido": 1245.0000903025114,
+   "suave": 1167.3919595652892,
+   "metodo": "suave"
+  },
+  "Left-Cerebellum-White-Matter": {
+   "principal": 16296.365917701,
+   "rigido": 14729.001068325855,
+   "suave": 16296.365917701,
+   "metodo": "suave"
+  },
+  "Left-Cerebellum-Cortex": {
+   "principal": 46976.72364253067,
+   "rigido": 50176.00363937254,
+   "suave": 46976.72364253067,
+   "metodo": "suave"
+  },
+  "Left-Thalamus": {
+   "principal": 5593.382806435869,
+   "rigido": 5744.000416624599,
+   "suave": 5593.382806435869,
+   "metodo": "suave"
+  },
+  "Left-Caudate": {
+   "principal": 3483.7276998589823,
+   "rigido": 3523.000255530721,
+   "suave": 3483.7276998589823,
+   "metodo": "suave"
+  },
+  "Left-Putamen": {
+   "principal": 5136.367891063137,
+   "rigido": 5224.000378907887,
+   "suave": 5136.367891063137,
+   "metodo": "suave"
+  },
+  "Left-Pallidum": {
+   "principal": 896.4917467754158,
+   "rigido": 920.0000667295666,
+   "suave": 896.4917467754158,
+   "metodo": "suave"
+  },
+  "3rd-Ventricle": {
+   "principal": 2035.4836784854406,
+   "rigido": 2274.000164938081,
+   "suave": 2035.4836784854406,
+   "metodo": "suave"
+  },
+  "4th-Ventricle": {
+   "principal": 2102.303960440055,
+   "rigido": 2255.00016355997,
+   "suave": 2102.303960440055,
+   "metodo": "suave"
+  },
+  "Brain-Stem": {
+   "principal": 21207.66867050255,
+   "rigido": 21946.001591790293,
+   "suave": 21207.66867050255,
+   "metodo": "suave"
+  },
+  "Left-Hippocampus": {
+   "principal": 2716.9584566671374,
+   "rigido": 2880.000208892556,
+   "suave": 2716.9584566671374,
+   "metodo": "suave"
+  },
+  "Left-Amygdala": {
+   "principal": 1061.1076290215046,
+   "rigido": 1142.000082831701,
+   "suave": 1061.1076290215046,
+   "metodo": "suave"
+  },
+  "Left-Accumbens-area": {
+   "principal": 454.5093591325627,
+   "rigido": 498.00003612100454,
+   "suave": 454.5093591325627,
+   "metodo": "suave"
+  },
+  "Left-VentralDC": {
+   "principal": 3473.6720787994377,
+   "rigido": 3658.0002653225592,
+   "suave": 3473.6720787994377,
+   "metodo": "suave"
+  },
+  "Right-Cerebral-White-Matter": {
+   "principal": 191409.35225913473,
+   "rigido": 189012.0137094444,
+   "suave": 191409.35225913473,
+   "metodo": "suave"
+  },
+  "Right-Cerebral-Cortex": {
+   "principal": 236670.70315706756,
+   "rigido": 249761.01811569923,
+   "suave": 236670.70315706756,
+   "metodo": "suave"
+  },
+  "Right-Lateral-Ventricle": {
+   "principal": 23119.738372265492,
+   "rigido": 23435.001699790646,
+   "suave": 23119.738372265492,
+   "metodo": "suave"
+  },
+  "Right-Inf-Lat-Vent": {
+   "principal": 1517.7601702797697,
+   "rigido": 1655.0001200406878,
+   "suave": 1517.7601702797697,
+   "metodo": "suave"
+  },
+  "Right-Cerebellum-White-Matter": {
+   "principal": 16491.004209670336,
+   "rigido": 14675.00106440912,
+   "suave": 16491.004209670336,
+   "metodo": "suave"
+  },
+  "Right-Cerebellum-Cortex": {
+   "principal": 44797.198057931346,
+   "rigido": 49541.00359331463,
+   "suave": 44797.198057931346,
+   "metodo": "suave"
+  },
+  "Right-Thalamus": {
+   "principal": 5235.742308670457,
+   "rigido": 5375.00038986024,
+   "suave": 5235.742308670457,
+   "metodo": "suave"
+  },
+  "Right-Caudate": {
+   "principal": 3668.990972514758,
+   "rigido": 3688.0002674985235,
+   "suave": 3668.990972514758,
+   "metodo": "suave"
+  },
+  "Right-Putamen": {
+   "principal": 5002.313361180074,
+   "rigido": 5082.000368608324,
+   "suave": 5002.313361180074,
+   "metodo": "suave"
+  },
+  "Right-Pallidum": {
+   "principal": 851.9435974603438,
+   "rigido": 874.0000633930883,
+   "suave": 851.9435974603438,
+   "metodo": "suave"
+  },
+  "Right-Hippocampus": {
+   "principal": 2673.950228690461,
+   "rigido": 2859.0002073693813,
+   "suave": 2673.950228690461,
+   "metodo": "suave"
+  },
+  "Right-Amygdala": {
+   "principal": 1214.4366817760424,
+   "rigido": 1299.0000942192469,
+   "suave": 1214.4366817760424,
+   "metodo": "suave"
+  },
+  "Right-Accumbens-area": {
+   "principal": 474.86029402937606,
+   "rigido": 522.0000378617758,
+   "suave": 474.86029402937606,
+   "metodo": "suave"
+  },
+  "Right-VentralDC": {
+   "principal": 3381.5694961743334,
+   "rigido": 3581.0002597375847,
+   "suave": 3381.5694961743334,
+   "metodo": "suave"
+  }
+ },
+ "agregados": {},
+ "vic": null,
+ "segundos": 255
+}

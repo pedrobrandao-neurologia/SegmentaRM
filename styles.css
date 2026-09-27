@@ -418,3 +418,12 @@ tr.groupsep td {
 @media (prefers-contrast: more) {
   :root { --line: rgba(255, 255, 255, 0.3); --line-strong: rgba(255, 255, 255, 0.42); --dim: #C8CFD8; --faint: #A0A8B2; }
 }
+
+/* alertas de QC (regras declarativas) */
+.alertas { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.alertas li { font-size: 12px; line-height: 1.45; padding: 7px 9px; border-radius: 6px; background: rgba(255,255,255,0.04); border-left: 3px solid var(--muted); }
+.alertas li span { color: var(--muted); }
+.alertas li i { color: var(--faint); font-style: normal; font-size: 10.5px; }
+.alertas li.al-alerta { border-left-color: var(--accent-strong); }
+.alertas li.al-atencao { border-left-color: var(--warn); }
+.alertas li.al-ok { border-left-color: #3c9a64; }

@@ -1,0 +1,181 @@
+{
+ "gerado": "2026-09-27",
+ "componentes": {
+  "synthseg1": {
+   "descricao": "SynthSeg 1.0 (pesos tfjs convertidos do synthseg_1.0.h5 oficial)",
+   "sha256": "4cbc418814a52d0f81f7ab8c8efee722cd118073811f584c7502220b084c9dc1",
+   "arquivos": [
+    {
+     "arquivo": "models/synthseg1/group1-shard1of7.bin",
+     "sha256": "23a9326f72d38a7a628f3244764e6dfb7d14d3f2fc68018f4e756808b8affe9e"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard2of7.bin",
+     "sha256": "41a40c9450ccef0230b669e97633af78a1530a1c7afefff8f7ce49fc605c3520"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard3of7.bin",
+     "sha256": "5ee46242d961c15d5554a218a6465f948f727136a7e3de5270007df5d05d2c50"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard4of7.bin",
+     "sha256": "d5d6a8b44c789f02030fad50be2c769629e92a2d34633319e629dcca960f7281"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard5of7.bin",
+     "sha256": "4b34633598dbe21627832dc46b2100d3ef6f6af0b1e14a49d54f3a04ca2cd748"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard6of7.bin",
+     "sha256": "1465af1e11df68022f539ac77c091b0058215557782e781d6ddeb4c0f4aa6151"
+    },
+    {
+     "arquivo": "models/synthseg1/group1-shard7of7.bin",
+     "sha256": "1efca3ee120450e1b73d5fc321c78e5a6ebee6dcde15a637f9a10fbf0f7be3be"
+    },
+    {
+     "arquivo": "models/synthseg1/labels.json",
+     "sha256": "5080af7857b5c8d3bef6b841f40717acfc560b705910a9572e282d7250ee248b"
+    },
+    {
+     "arquivo": "models/synthseg1/labels_dkt.json",
+     "sha256": "1a970e41bfb0ff7e8c9be2bb7fe075b471769fc7a1c5df49fc50ef490dee28bb"
+    },
+    {
+     "arquivo": "models/synthseg1/model.json",
+     "sha256": "0b60f075e5fbd195659f5d4e26771c8af924cdb8394194bc017b59add90d36df"
+    }
+   ]
+  },
+  "fastsurfer": {
+   "descricao": "FastSurferCNN v1 (3 vistas; parcelação DKT)",
+   "sha256": "e38b78bc88ef5a8c3be8fe1a0c007180b33b849990b52ad837463d7a9ad8449c",
+   "arquivos": [
+    {
+     "arquivo": "models/fastsurfer/axial.bin",
+     "sha256": "6a60afcfc9ac01048c3eb2f1509eb943504fb0f5dd533095f22247bca143e3ab"
+    },
+    {
+     "arquivo": "models/fastsurfer/coronal.bin",
+     "sha256": "70dfb7e9d2516c22dedd943da2e95a62c69041fc972cbab71ffc821a997e68c9"
+    },
+    {
+     "arquivo": "models/fastsurfer/manifest.json",
+     "sha256": "c0dfd2d132e17ee13ca11761dd36f606e8fe72790497d26d6450fd7843aa09b7"
+    },
+    {
+     "arquivo": "models/fastsurfer/sagittal.bin",
+     "sha256": "3d867765b2a7242296363e41252f1aabc45da3749b90d7d4a4be224784dddb4a"
+    }
+   ]
+  },
+  "synthsr": {
+   "descricao": "SynthSR v1.0",
+   "sha256": "b8e5a6896854be3501307a0181d90c368a56bdc3fc0206d9f13225518d4d64f7",
+   "arquivos": [
+    {
+     "arquivo": "models/synthsr/group1-shard1of7.bin",
+     "sha256": "6d924d42b8cf0d091d0b8863b90cc1eee2fda32c2b17c93e1255bc4df0ddde08"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard2of7.bin",
+     "sha256": "6ac77cef8b2779bc40db16de26f4e2e3d47316f8473d077061da60d4fd93c111"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard3of7.bin",
+     "sha256": "aa7193f66e622f62e4f46917e865d7c0d5722b01548d5a3f644f530a78ee670d"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard4of7.bin",
+     "sha256": "122d86c498722699203e547276542949dcbe330b0308f3f08524d0c5e0024199"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard5of7.bin",
+     "sha256": "dd6cea328f180620043114a385f033afcdecb1870be419a3582406a36db2c3d6"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard6of7.bin",
+     "sha256": "f4f72b660c77660699e01afd8564af2acd75feac439161a592364e1c68673108"
+    },
+    {
+     "arquivo": "models/synthsr/group1-shard7of7.bin",
+     "sha256": "59b10b35306570a647d907c66f27b3efe73f694d20bb742087287c013a976cb5"
+    },
+    {
+     "arquivo": "models/synthsr/model.json",
+     "sha256": "9f7533be86332df0f4a8123f85ffe5efde12d84d868511e1ddfb6fbb66215a75"
+    }
+   ]
+  },
+  "normas_brainchart": {
+   "descricao": "BrainChart — quantis tabelados (Bethlehem et al., Nature 2022)",
+   "sha256": "cf06105de96cf52692af3103b7d50e47bf1c7e2e4228e563fee3c881534d249b",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/brainchart.json",
+     "sha256": "a873568d62218f39d57ba3d619b0cf5c56795f376913bff08f47358a6dc518df"
+    }
+   ]
+  },
+  "normas_centilebrain": {
+   "descricao": "CentileBrain — quantis subcorticais (Ge et al., 2024)",
+   "sha256": "8c171e0558f3ed315c36a844b75333371c9b3545cd406da51ce563e3fdd127c8",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/subcortical.json",
+     "sha256": "aec0e54e957e7a80cf72faed101a30213d778fa80601c114ec45ba8e45e54037"
+    }
+   ]
+  },
+  "vic_template": {
+   "descricao": "VIC: template MNI152 2009c embutido e constante de calibração",
+   "sha256": "0c8cbe32e304eca6ab3940fb281e58a2203fdaa7688cf18d27098b66d7f342ef",
+   "arquivos": [
+    {
+     "arquivo": "lib/icv.js",
+     "sha256": "8e36f1851bf30edf68f4eeca0d2a57bc11f1ac650b703e772e6982100a221891"
+    }
+   ]
+  },
+  "tradutor": {
+   "descricao": "Tradutor SynthSeg → FreeSurfer (nível A; deslocamento por idade e sexo ajustado no DLBS)",
+   "sha256": "d03ff0041743e02c668f81ad2cf540478c76062571621a3c081b70a73b1a64ef",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/tradutor_synthseg_fs.json",
+     "sha256": "1827b5a3b2f1a91f8acc4a2a8440fc40a0da00edd4eb1b5f29ab72fc8cb74fa5"
+    }
+   ]
+  },
+  "referencia_mesmo_metodo": {
+   "descricao": "Assimetria e HOC por idade — SynthSeg 1.0 do SegmentaRM em controles do DLBS",
+   "sha256": "e8f01f3de314fcd3a5ff07f7f728e2e5de9fdec3ec2005ef697e42fc198683ce",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/referencia_mesmo_metodo.json",
+     "sha256": "d80aa7dfcda1c3fa54efcbfb7db28c352fd274988b69e8c25b34e3ed24f19f5b"
+    }
+   ]
+  },
+  "erro_medida": {
+   "descricao": "Erro de medida teste-reteste por estrutura (intervalo de 90% do z)",
+   "sha256": "60ba6149da6191b9fba4688b46c97c1a7c42134addac02a05ba80b9becf80b80",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/erro_medida.json",
+     "sha256": "4b7dd7b0f1567d6d49ab417adcd531088b3ad07cb4519083d09af14e6d4a158e"
+    }
+   ]
+  },
+  "regras_qc": {
+   "descricao": "Regras declarativas de QC",
+   "sha256": "08e4e4a3847b87880246551ec946867da6fd9ccc8d37337be2dda48efcb905e7",
+   "arquivos": [
+    {
+     "arquivo": "models/qc_rules.json",
+     "sha256": "1c99c2fe30c1db4ec6b219bfbedb78123fce5051c4f5127edffad6fe903430c2"
+    }
+   ]
+  }
+ }
+}
