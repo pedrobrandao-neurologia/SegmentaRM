@@ -137,23 +137,23 @@
     }
    ]
   },
-  "tradutor": {
-   "descricao": "Tradutor SynthSeg → FreeSurfer (nível A; deslocamento por idade e sexo ajustado no DLBS)",
-   "sha256": "d03ff0041743e02c668f81ad2cf540478c76062571621a3c081b70a73b1a64ef",
+  "recentragem": {
+   "descricao": "Recentragem pelo método (nível A): desvio do z de controles do DLBS medidos com o mesmo SynthSeg",
+   "sha256": "bf536d0999a4c0f7b97a256e773a4b47313de109396776a34d71022b3c9bd3ee",
    "arquivos": [
     {
-     "arquivo": "models/normative/tradutor_synthseg_fs.json",
-     "sha256": "1827b5a3b2f1a91f8acc4a2a8440fc40a0da00edd4eb1b5f29ab72fc8cb74fa5"
+     "arquivo": "models/normative/recentragem_synthseg.json",
+     "sha256": "709c17c1485c1183ccf1d65131341c1cff2e4cfd78688222c02470d20883110f"
     }
    ]
   },
   "referencia_mesmo_metodo": {
    "descricao": "Assimetria e HOC por idade — SynthSeg 1.0 do SegmentaRM em controles do DLBS",
-   "sha256": "e8f01f3de314fcd3a5ff07f7f728e2e5de9fdec3ec2005ef697e42fc198683ce",
+   "sha256": "255d8fba92ce182d102b9caf8b4f2e7266813d660509166ad2957a96484a7272",
    "arquivos": [
     {
      "arquivo": "models/normative/referencia_mesmo_metodo.json",
-     "sha256": "d80aa7dfcda1c3fa54efcbfb7db28c352fd274988b69e8c25b34e3ed24f19f5b"
+     "sha256": "cad5718960a392f66373ee281b8cdaf9a6c625b0147a21999639ee53fcdadc05"
     }
    ]
   },
@@ -169,11 +169,11 @@
   },
   "regras_qc": {
    "descricao": "Regras declarativas de QC",
-   "sha256": "08e4e4a3847b87880246551ec946867da6fd9ccc8d37337be2dda48efcb905e7",
+   "sha256": "461306aabccb78b6f2337e6fb0df70d5bc3b97494fd25de708c247b3a24e54b5",
    "arquivos": [
     {
      "arquivo": "models/qc_rules.json",
-     "sha256": "1c99c2fe30c1db4ec6b219bfbedb78123fce5051c4f5127edffad6fe903430c2"
+     "sha256": "3efaf742fd4b5279c1bb065989f984ab25d5e93573c88a066a5f0141ced74807"
     }
    ]
   }

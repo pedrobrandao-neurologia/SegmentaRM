@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Lote OFFLINE do SynthSeg do app (tools/synthseg_node.mjs) para construir tradutores e
-// referências do mesmo método (tools/tradutor_dlbs.py). Nada disso roda no app.
+// Lote OFFLINE do SynthSeg do app (tools/synthseg_node.mjs) para construir a recentragem e as
+// referências do mesmo método (tools/referencias_dlbs.py, tools/recentragem_dlbs.mjs). Nada disso
+// roda no app.
 //
 //   npm i --no-save @tensorflow/tfjs-node@4.22.0      (mesma versão do tfjs vendorizado)
 //   node tools/lote_synthseg_node.mjs <pasta com *_T1w.nii.gz> <pasta de saída> [selecao.json]

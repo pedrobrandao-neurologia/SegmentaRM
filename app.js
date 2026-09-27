@@ -2107,8 +2107,8 @@ async function updateNorms () {
   }
   try {
     await loadNorms()
-    atualizarTradutor()
-    atualizarCalibracao() // a calibração depende do modo (com/sem tradutor)
+    atualizarRecentragem()
+    atualizarCalibracao() // a calibração depende do modo (com/sem recentragem)
     state.norms = compareToNorms(state.stats, { age, sex }, normOpts())
     renderNorms()
     if (state.norms.flags.length) {
@@ -2199,13 +2199,13 @@ async function capturarCortes (alvos) {
   return out
 }
 
-// opções da comparação normativa: proveniência da medida do paciente, tradução de escala
+// opções da comparação normativa: proveniência da medida do paciente, recentragem pelo método
 // (nível A, se ligada) e calibração de sítio (nível C, se houver para o protocolo do exame)
 function normOpts () {
   return {
     ferramentaPaciente: state.modelUsed || null,
     metodoVolume: state.stats && state.stats.volumeSoft ? 'suave' : 'rígido',
-    tradutor: state.tradutorAtivo ? state.tradutor : null,
+    recentragem: state.recentragemAtiva ? state.recentragem : null,
     calibracao: state.calibracao || null
   }
 }
@@ -2219,7 +2219,7 @@ function renderNorms () {
   $('norm-panel').hidden = false
   const thead = $('norm-table').querySelector('thead')
   const tbody = $('norm-table').querySelector('tbody')
-  thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th style="text-align:right" title="Intervalo de 90% do z: erro de medida (teste-reteste publicado; entre scanners se o sítio não está calibrado) + tradução + calibração. Não inclui a incerteza do próprio modelo normativo.">IC 90%</th><th></th></tr>'
+  thead.innerHTML = '<tr><th>Medida</th><th style="text-align:right">cm³</th><th style="text-align:right">P</th><th style="text-align:right">z</th><th style="text-align:right" title="Intervalo de 90% do z: erro de medida (teste-reteste publicado; entre scanners se o sítio não está calibrado) + recentragem + calibração. Não inclui a incerteza do próprio modelo normativo.">IC 90%</th><th></th></tr>'
   tbody.innerHTML = ''
   const sub = n.subcorticais || []
   const pv = n.proveniencia || {}
@@ -2237,8 +2237,8 @@ function renderNorms () {
     // idade na borda da norma: z em cinza (estimativa instável)
     const cinza = g.extrapolacao ? 'color:var(--muted)' : ''
     const inc = g.incerteza
-    tr.title = [g.extrapolacao ? (g.traduzido && g.traduzido.foraDaFaixa ? 'idade fora da faixa em que o tradutor foi ajustado — z instável' : 'idade na borda/fora da faixa da norma — z instável') : '', g.holm ? 'significativo após correção de Holm (α 5%)' : '', g.preEspecificada ? 'estrutura pré-especificada' : '', g.calibrado ? `calibrado (n = ${g.calibrado.n})` : '', g.traduzido ? `z na escala FreeSurfer (tradutor; volume traduzido ${(g.traduzido.valor / 1000).toFixed(1)} cm³; z sem tradução ${fmtZs(g.zBruto)})` : '',
-      inc ? `IC 90%: medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` + (inc.traducao ? `, tradução ±${(1.645 * inc.traducao).toFixed(2)}` : '') + (inc.calibracao ? `, calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : '') : ''].filter(Boolean).join(' · ')
+    tr.title = [g.extrapolacao ? (g.recentrado && g.recentrado.foraDaFaixa ? 'idade fora da faixa em que a recentragem foi ajustada — z instável' : 'idade na borda/fora da faixa da norma — z instável') : '', g.holm ? 'significativo após correção de Holm (α 5%)' : '', g.preEspecificada ? 'estrutura pré-especificada' : '', g.calibrado ? `calibrado (n = ${g.calibrado.n})` : '', g.recentrado ? `z recentrado pelo método (controles do mesmo método ficam em z ${fmtZs(g.recentrado.desloc)} nesta idade; z sem recentragem ${fmtZs(g.zBruto)})` : '',
+      inc ? `IC 90%: medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` + (inc.recentragem ? `, recentragem ±${(1.645 * inc.recentragem).toFixed(2)}` : '') + (inc.calibracao ? `, calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : '') : ''].filter(Boolean).join(' · ')
     tr.innerHTML = `<td>${g.pt}${marca}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
       `<td class="num" style="${cinza}">${formatPercentil(g.percentile)}</td>` +
@@ -2257,7 +2257,7 @@ function renderNorms () {
         partes.push(`Desvios em bloco (${Math.round(100 * (m.fracPositivos > 0.5 ? m.fracPositivos : 1 - m.fracPositivos))}% no mesmo sentido): padrão típico de viés de medida/norma ou de sítio não calibrado, não de biologia.`)
       }
     }
-    partes.push('As normas são de volumes FreeSurfer; o paciente é medido com outra ferramenta — sem tradução de escala ou calibração de sítio, os z podem ter viés sistemático. z em cinza: idade na borda da norma. IC 90%: erro de medida (entre scanners enquanto o sítio não estiver calibrado) + tradução + calibração; não inclui a incerteza do próprio modelo normativo.')
+    partes.push('As normas são de volumes FreeSurfer; o paciente é medido com outra ferramenta — sem a recentragem pelo método (controles do mesmo SynthSeg) ou a calibração do sítio, os z podem ter viés sistemático. z em cinza: idade na borda da norma. IC 90%: erro de medida (entre scanners enquanto o sítio não estiver calibrado) + recentragem + calibração; não inclui a incerteza do próprio modelo normativo.')
     note.hidden = false
     note.textContent = partes.join(' ')
   }
@@ -2312,7 +2312,7 @@ function reprodutibilidadeMeta () {
   if (state.norms && state.norms.available) { add('normas_brainchart'); if (state.norms.subcorticais) add('normas_centilebrain') }
   if (state.icv) add('vic_template')
   if (state.norms && state.norms.available) {
-    if (state.tradutorAtivo) add('tradutor')
+    if (state.recentragemAtiva) add('recentragem')
     if (state.norms.globals.some(g => g.ic90) || (state.norms.subcorticais || []).some(g => g.ic90)) add('erro_medida')
   }
   if ((state.assimetria || []).some(p => p.zIA != null)) add('referencia_mesmo_metodo')
@@ -2592,39 +2592,40 @@ async function handleExport (kind) {
   }
 }
 
-// ---------- tradução de escala SynthSeg → FreeSurfer (nível A) ----------
-// os coeficientes (models/normative/tradutor_synthseg_fs.json) vêm de exames processados com
-// as duas ferramentas; só valem para a MESMA medida de origem (SynthSeg 1.0, volume suave)
-async function carregarTradutor () {
+// ---------- recentragem pelo método (nível A) ----------
+// os coeficientes (models/normative/recentragem_synthseg.json) vêm de controles saudáveis medidos
+// com o MESMO SynthSeg do app (volume suave); só valem para essa medida
+async function carregarRecentragem () {
   try {
-    const r = await fetch('./models/normative/tradutor_synthseg_fs.json')
+    const r = await fetch('./models/normative/recentragem_synthseg.json')
     if (!r.ok) return
-    state.tradutor = await r.json()
-    const pref = localStorage.getItem('segmentarm_tradutor_ativo')
-    state.tradutorPreferido = pref == null ? !!state.tradutor.ativoPorPadrao : pref === '1'
-    const cb = $('opt-tradutor')
+    state.recentragem = await r.json()
+    let pref = null
+    try { pref = localStorage.getItem('segmentarm_recentragem_ativa') } catch { /* modo privado */ }
+    state.recentragemPreferida = pref == null ? !!state.recentragem.ativoPorPadrao : pref === '1'
+    const cb = $('opt-recentragem')
     if (cb) {
-      $('tradutor-wrap').hidden = false
-      cb.checked = state.tradutorPreferido
+      $('recentragem-wrap').hidden = false
+      cb.checked = state.recentragemPreferida
       cb.onchange = () => {
-        state.tradutorPreferido = cb.checked
-        try { localStorage.setItem('segmentarm_tradutor_ativo', cb.checked ? '1' : '0') } catch { /* modo privado */ }
-        atualizarTradutor()
+        state.recentragemPreferida = cb.checked
+        try { localStorage.setItem('segmentarm_recentragem_ativa', cb.checked ? '1' : '0') } catch { /* modo privado */ }
+        atualizarRecentragem()
         atualizarCalibracao()
         updateNorms()
       }
     }
-    atualizarTradutor()
-  } catch { /* sem tradutor: normas cruas */ }
+    atualizarRecentragem()
+  } catch { /* sem recentragem: z crus contra as normas */ }
 }
 
-// o tradutor só se aplica quando a medida do paciente é a mesma da origem dos coeficientes
-function atualizarTradutor () {
-  const t = state.tradutor
+// a recentragem só se aplica quando a medida do paciente é a mesma dos controles de referência
+function atualizarRecentragem () {
+  const t = state.recentragem
   const origemOk = !!(t && state.stats && state.stats.volumeSoft && /SynthSeg/i.test(state.modelUsed || ''))
-  state.tradutorAtivo = !!(t && state.tradutorPreferido && origemOk)
-  const wrap = $('tradutor-wrap')
-  if (wrap && t) wrap.title = `${t.fonte || ''} — ${t.ferramentaOrigem || ''} → ${t.ferramentaDestino || ''}; n = ${t.n || '?'}; idades ${(t.idadeFaixa || []).join('–')}` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)')
+  state.recentragemAtiva = !!(t && state.recentragemPreferida && origemOk)
+  const wrap = $('recentragem-wrap')
+  if (wrap && t) wrap.title = `${t.fonte || ''} — n = ${t.n || '?'}; idades ${(t.idadeFaixa || []).join('–')}. ${t.metodo || ''}` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)')
 }
 
 // ---------- calibração do sítio (nível C) ----------
@@ -2634,10 +2635,10 @@ function controlesDoProtocolo () {
   return state.cohort.map(e => e.row).filter(r => +r.controle === 1 && r.protocolo_familia === fam)
 }
 
-// escolhe a calibração deste protocolo (no mesmo modo — com ou sem tradutor) e atualiza o painel
+// escolhe a calibração deste protocolo (no mesmo modo — com ou sem recentragem) e atualiza o painel
 function atualizarCalibracao () {
   const fam = state.protocolo && state.protocolo.familia
-  state.calibracao = calibracaoPara(fam, state.tradutorAtivo ? state.tradutor : null)
+  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null)
   const el = $('calib-status')
   if (!el) return
   const n = controlesDoProtocolo().length
@@ -2648,7 +2649,7 @@ function atualizarCalibracao () {
   el.textContent = `Protocolo deste exame: ${state.protocolo.familiaTxt} (família ${fam}). Controles deste protocolo na coorte: ${n}` +
     (n < N_MIN_DESLOCAMENTO ? ` (mínimo ${N_MIN_DESLOCAMENTO}).` : '.') +
     (c ? ` Calibração ativa: n = ${c.n} (${c.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}), criada em ${c.criada}.` + resumoControles(c)
-      : calibracaoDesatualizada(fam, state.tradutorAtivo ? state.tradutor : null) ? ' A calibração guardada foi feita com outra versão do tradutor de escala — recalcule-a com os controles.'
+      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null) ? ' A calibração guardada foi feita com outra versão da recentragem pelo método — recalcule-a com os controles.'
         : ' Sem calibração: os z deste exame saem com o selo "não calibrado para este sítio".') +
     (state.protocolo.semDicom ? ' Atenção: entrada sem cabeçalho DICOM — o protocolo não pôde ser identificado.' : '')
 }
@@ -2669,7 +2670,7 @@ function resumoControles (c) {
 function calcularCalibracaoSitio () {
   const linhas = controlesDoProtocolo()
   if (linhas.length < N_MIN_DESLOCAMENTO) { log(`Calibração: são necessários ≥ ${N_MIN_DESLOCAMENTO} controles deste protocolo na coorte (há ${linhas.length}).`, 'err'); return }
-  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, tradutor: state.tradutorAtivo ? state.tradutor : null })
+  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null })
   salvarCalibracao(cal)
   log(`Calibração do sítio calculada com ${cal.n} controles (${cal.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}).` + (cal.avisos.length ? ' Avisos: ' + cal.avisos.join(' ') : ''), 'ok')
   atualizarCalibracao()
@@ -2993,7 +2994,7 @@ async function main () {
   fetch('./models/manifest-sha256.json').then(r => r.ok ? r.json() : null).then(m => { state.manifesto = m }).catch(() => {})
   fetch('./models/qc_rules.json').then(r => r.ok ? r.json() : null).then(m => { state.regrasQC = m }).catch(() => {})
   carregarAssimetria().then(() => { if (state.stats) atualizarAlertas() })
-  carregarTradutor()
+  carregarRecentragem()
   log('SegmentaRM ' + VERSION + ' pronto. Nenhuma imagem sai do dispositivo.')
 }
 

@@ -1,9 +1,10 @@
-// Referências do mesmo método (assimetria e HOC por idade), regra do tradutor fora do domínio
+// Referências do mesmo método (assimetria e HOC por idade), regra da recentragem fora do domínio
 // e coerência entre o JSON de referência e o módulo que o lê.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { anotarAssimetria, iaEsperado, zHoc } from '../../lib/assimetria.js'
 import { avaliarRegras } from '../../lib/qcrules.js'
@@ -52,25 +53,32 @@ test('HOC por idade: a regra usa o z quando há referência e o corte fixo quand
   assert.ok(!semRef.some(a => a.id === 'hipocampo_corno_temporal'))
 })
 
-test('tradutor fora do domínio: avisa em outro fabricante/campo; cala com o sítio calibrado', () => {
-  const tr = { dominio: { fabricante: 'Philips', campoT: 3, descricao: 'Philips 3 T' } }
-  const normas = { globals: [], subcorticais: [], flags: [], proveniencia: { tradutor: tr } }
+test('recentragem fora do domínio: avisa em outro fabricante/campo; cala com o sítio calibrado', () => {
+  const rc = { dominio: { fabricante: 'Philips', campoT: 3, descricao: 'Philips 3 T' } }
+  const normas = { globals: [], subcorticais: [], flags: [], proveniencia: { recentragem: rc } }
   const ge = avaliarRegras(regras, { normas, aquisicao: { fabricante: 'GE MEDICAL SYSTEMS', campoT: 3 } })
-  assert.ok(ge.some(a => a.id === 'tradutor_fora_do_dominio' && /GE/.test(a.mensagem)))
+  assert.ok(ge.some(a => a.id === 'recentragem_fora_do_dominio' && /GE/.test(a.mensagem)))
   const ph = avaliarRegras(regras, { normas, aquisicao: { fabricante: 'Philips Medical Systems', campoT: 3 } })
-  assert.ok(!ph.some(a => a.id === 'tradutor_fora_do_dominio'))
-  const cal = avaliarRegras(regras, { normas: { ...normas, proveniencia: { tradutor: tr, calibracao: { n: 30 } } }, aquisicao: { fabricante: 'GE', campoT: 1.5 } })
-  assert.ok(!cal.some(a => a.id === 'tradutor_fora_do_dominio'))
+  assert.ok(!ph.some(a => a.id === 'recentragem_fora_do_dominio'))
+  const cal = avaliarRegras(regras, { normas: { ...normas, proveniencia: { recentragem: rc, calibracao: { n: 30 } } }, aquisicao: { fabricante: 'GE', campoT: 1.5 } })
+  assert.ok(!cal.some(a => a.id === 'recentragem_fora_do_dominio'))
 })
 
 test('arquivos de referência embarcados: formato que o app lê', () => {
   for (const [arq, chk] of [
     ['models/normative/referencia_mesmo_metodo.json', (d) => d.assimetria && d.assimetria.estruturas.Hippocampus && d.hoc && d.hoc.lados.E && d.idadeFaixa],
-    ['models/normative/tradutor_synthseg_fs.json', (d) => d.estruturas && d.estruturas.CortexVol && Array.isArray(d.estruturas.CortexVol.cov) && d.dominio && d.idadeFaixa],
+    ['models/normative/recentragem_synthseg.json', (d) => d.estruturas && d.estruturas.CortexVol && d.estruturas['Left-Hippocampus'] && d.estruturas.CortexVol.cov.length === 4 && d.dominio && d.idadeFaixa && d.normasSha256],
     ['models/normative/erro_medida.json', (d) => d.estruturas && d.estruturas['Left-Hippocampus'] && d.estruturas.CortexVol]
   ]) {
     const p = path.join(RAIZ, arq)
     if (!fs.existsSync(p)) { assert.fail(`${arq} ausente`) }
     assert.ok(chk(JSON.parse(fs.readFileSync(p, 'utf8'))), `${arq} fora do formato esperado`)
   }
+})
+
+test('recentragem embarcada foi ajustada com as normas embarcadas (SHA-256 confere)', () => {
+  const rc = ler('models/normative/recentragem_synthseg.json')
+  const h = (p) => crypto.createHash('sha256').update(fs.readFileSync(path.join(RAIZ, p))).digest('hex')
+  assert.equal(rc.normasSha256.brainchart, h('models/normative/brainchart.json'), 'brainchart.json mudou: rode tools/recentragem_dlbs.mjs de novo')
+  assert.equal(rc.normasSha256.subcortical, h('models/normative/subcortical.json'), 'subcortical.json mudou: rode tools/recentragem_dlbs.mjs de novo')
 })

@@ -288,7 +288,7 @@
 
       <section class="panel" id="norm-panel" hidden>
         <h3>Normativo — idade e sexo</h3>
-        <label class="check" id="tradutor-wrap" hidden title="Leva o volume SynthSeg (suave) à escala do FreeSurfer antes de consultar as normas: um deslocamento por idade e sexo ajustado em controles processados pelas duas ferramentas, sem mudar a escala do z (nível A do plano metodológico); a incerteza do deslocamento entra no intervalo de 90% do z"><input type="checkbox" id="opt-tradutor"> tradução de escala SynthSeg → FreeSurfer</label>
+        <label class="check" id="recentragem-wrap" hidden title="Desconta do z o desvio que controles saudáveis medidos com o MESMO SynthSeg têm contra cada norma, por idade e sexo (nível A do plano metodológico); a escala do z continua a da norma e a incerteza entra no intervalo de 90%"><input type="checkbox" id="opt-recentragem"> recentragem pelo método (controles do mesmo SynthSeg)</label>
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
         <p class="note">BrainChart (Bethlehem et al., Nature 2022) e CentileBrain (Ge et al., 2024) — normas de volumes
         FreeSurfer. Aproximação para QC e pesquisa, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>

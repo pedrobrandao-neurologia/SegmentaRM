@@ -1,5 +1,5 @@
 // Normas: fidelidade ao R (CentileBrain), multiplicidade/Holm, percentis, proveniência e
-// borda etária, ausência de z lobar, tradução de escala e calibração de sítio.
+// borda etária, ausência de z lobar, recentragem pelo método e calibração de sítio.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -68,33 +68,33 @@ test('sem z por lobo; proveniência e borda etária por família', () => {
   assert.equal(jovem.proveniencia.centilebrain.borda, false)
 })
 
-test('tradução de escala: deslocamento por idade e sexo, sem mudar a escala do z; incerteza no intervalo', () => {
-  const z5 = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
-  const covH = z5.map(r => r.slice()); covH[0][0] = 4e-4
-  const tradutor = {
-    idadeRef: 60, idadeFaixa: [21, 89],
+test('recentragem pelo método: desconta o desvio dos controles por idade e sexo; incerteza no intervalo', () => {
+  const z4 = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+  const covH = z4.map(r => r.slice()); covH[0][0] = 0.01 // EP de 0,1 z no deslocamento
+  const rec = {
+    idadeRef: 60, idadeFaixa: [21, 89], n: 100, fonteCurta: 'teste',
     estruturas: {
-      'Left-Hippocampus': { a: 0, b: 1, c: 0, d: 0, e: 0, x0: 0, cov: covH },
-      CortexVol: { a: Math.log(0.85), b: 1, c: 0.001, d: 0, e: Math.log(1.02), x0: 0, cov: z5 }
+      'Left-Hippocampus': { a: 0, c: 0, d: 0, e: 0, cov: covH },
+      CortexVol: { a: 0.5, c: 0.01, d: 0, e: 0.2, cov: z4 }
     }
   }
-  const t = N.traduzirVolume(tradutor, 'CortexVol', 500e3, 60, 'F')
-  assert.ok(Math.abs(t.valor - 425e3) < 1)
-  assert.ok(Math.abs(N.traduzirVolume(tradutor, 'CortexVol', 500e3, 60, 'M').valor - 425e3 * 1.02) < 1, 'termo de sexo')
+  const r = N.recentragemZ(rec, 'CortexVol', 60, 'F')
+  assert.ok(Math.abs(r.desloc - 0.5) < 1e-12)
+  assert.ok(Math.abs(N.recentragemZ(rec, 'CortexVol', 70, 'M').desloc - (0.5 + 0.1 + 0.2)) < 1e-12, 'termos de idade e sexo')
   // fora da faixa do ajuste, os termos de idade ficam na borda (sem extrapolar)
-  const t95 = N.traduzirVolume(tradutor, 'CortexVol', 500e3, 95, 'F')
-  assert.ok(Math.abs(t95.valor - N.traduzirVolume(tradutor, 'CortexVol', 500e3, 89, 'F').valor) < 1e-6 && t95.foraDaFaixa)
-  const bruto = N.compareToNorms(stats, { age: 60, sex: 'M' }, {})
-  const trad = N.compareToNorms(stats, { age: 60, sex: 'M' }, { tradutor })
-  const hb = bruto.subcorticais.find(s => s.hemi === 'E'); const ht = trad.subcorticais.find(s => s.hemi === 'E')
-  // deslocamento nulo: mesmo z (a tradução não mexe na escala), intervalo mais largo pela incerteza do deslocamento
-  assert.ok(Math.abs(ht.z - hb.z) < 1e-9)
-  assert.ok(ht.incerteza.traducao > 0 && (ht.ic90[1] - ht.ic90[0]) > (hb.ic90[1] - hb.ic90[0]))
-  // a incerteza do deslocamento (EP 2% em log) vira z pela inclinação local da norma
-  assert.ok(Math.abs(ht.incerteza.traducao / ht.incerteza.medida - 0.02 / 0.022) < 0.2)
-  const gb = bruto.globals.find(g => g.pheno === 'GMV'); const gt = trad.globals.find(g => g.pheno === 'GMV')
-  assert.ok(gt.z < gb.z, 'córtex reduzido pela tradução → z menor')
-  assert.equal(gt.zBruto, gb.z)
+  const r95 = N.recentragemZ(rec, 'CortexVol', 95, 'F')
+  assert.ok(Math.abs(r95.desloc - N.recentragemZ(rec, 'CortexVol', 89, 'F').desloc) < 1e-12 && r95.foraDaFaixa)
+  const bruto = N.compareToNorms(stats, { age: 60, sex: 'F' }, {})
+  const reco = N.compareToNorms(stats, { age: 60, sex: 'F' }, { recentragem: rec })
+  const hb = bruto.subcorticais.find(s => s.hemi === 'E'); const hr = reco.subcorticais.find(s => s.hemi === 'E')
+  // deslocamento nulo: mesmo z, intervalo mais largo pela incerteza da recentragem
+  assert.ok(Math.abs(hr.z - hb.z) < 1e-9)
+  assert.ok(Math.abs(hr.incerteza.recentragem - 0.1) < 1e-9 && (hr.ic90[1] - hr.ic90[0]) > (hb.ic90[1] - hb.ic90[0]))
+  const gb = bruto.globals.find(g => g.pheno === 'GMV'); const gr = reco.globals.find(g => g.pheno === 'GMV')
+  assert.ok(Math.abs(gr.z - (gb.z - 0.5)) < 1e-9, 'z recentrado = z bruto − deslocamento')
+  assert.equal(gr.zBruto, gb.z)
+  // mediana esperada para o método: o volume em que a norma dá z = deslocamento (acima da mediana da norma)
+  assert.ok(gr.median > gr.medianaNorma && N.compareToNorms({ composites: [{ id: 'CortexVol', volMm3: gr.median }], rows: [] }, { age: 60, sex: 'F' }, { recentragem: rec }).globals[0].z < 0.01)
 })
 
 test('intervalo de 90% do z: erro entre scanners sem calibração; ausente sem modelo de erro', () => {
@@ -136,16 +136,16 @@ test('calibração de sítio: recupera um deslocamento simulado e respeita n mí
   assert.equal(statsDeLinha({ Left_Hippocampus: 4000 }).rows[0].name, 'Left-Hippocampus')
 })
 
-test('calibração guardada só vale para o mesmo tradutor (coeficientes novos exigem recalcular)', () => {
+test('calibração guardada só vale para a mesma recentragem (coeficientes novos exigem recalcular)', () => {
   const mem = new Map()
   globalThis.localStorage = { getItem: (k) => mem.has(k) ? mem.get(k) : null, setItem: (k, v) => mem.set(k, String(v)) }
-  const trA = { versao: '1.0', n: 100, gerado: '2026-09-27', estruturas: {} }
-  const trB = { ...trA, n: 201 }
+  const rcA = { versao: '1.0', n: 100, gerado: '2026-09-27', estruturas: {} }
+  const rcB = { ...rcA, n: 201 }
   const linhas = Array.from({ length: 12 }, (_, i) => ({ idade: 50 + i, sexo: i % 2 ? 'F' : 'M', CortexVol: 480e3 + 1e3 * i }))
-  salvarCalibracao(calcularCalibracao(linhas, { protocolo: { familia: 'fam1', familiaTxt: 't' }, tradutor: trA }))
-  assert.ok(calibracaoPara('fam1', trA))
-  assert.equal(calibracaoPara('fam1', trB), null)
-  assert.equal(calibracaoDesatualizada('fam1', trB), true)
-  assert.equal(calibracaoPara('fam1', null), null) // sem tradutor: outra calibração (modo diferente)
+  salvarCalibracao(calcularCalibracao(linhas, { protocolo: { familia: 'fam1', familiaTxt: 't' }, recentragem: rcA }))
+  assert.ok(calibracaoPara('fam1', rcA))
+  assert.equal(calibracaoPara('fam1', rcB), null)
+  assert.equal(calibracaoDesatualizada('fam1', rcB), true)
+  assert.equal(calibracaoPara('fam1', null), null) // sem recentragem: outra calibração (modo diferente)
   delete globalThis.localStorage
 })

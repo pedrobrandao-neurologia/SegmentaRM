@@ -85,16 +85,16 @@
       "fonte": "faixa de treino declarada por cada norma"
     },
     {
-      "id": "tradutor_fora_do_dominio",
-      "tipo": "tradutor_fora_do_dominio",
+      "id": "recentragem_fora_do_dominio",
+      "tipo": "recentragem_fora_do_dominio",
       "severidade": "info",
-      "titulo": "Tradução de escala fora do domínio em que foi ajustada",
+      "titulo": "Recentragem ajustada em outro equipamento",
       "params": {},
-      "mensagem": "O tradutor SynthSeg → FreeSurfer foi ajustado em {dominio}; este exame: {difs}.",
-      "recomendacao": "A diferença entre ferramentas depende do contraste da sequência (fronteira cinzenta/branca) e pode não ser a mesma neste equipamento. Enquanto o sítio não for calibrado com controles locais (nível C), trate desvios pequenos (|z| < 2) com cautela.",
+      "mensagem": "A recentragem pelo método (nível A) foi ajustada em controles de {dominio}; este exame: {difs}.",
+      "recomendacao": "O desvio entre o SynthSeg e a norma depende do contraste da sequência (fronteira cinzenta/branca) e pode não ser o mesmo neste equipamento — num conjunto externo de adultos jovens (Siemens), restaram desvios de até ~1 DP em algumas estruturas. Enquanto o sítio não for calibrado com controles locais (nível C), trate desvios pequenos (|z| < 2) com cautela.",
       "capturas": [],
       "status": "validado",
-      "fonte": "domínio declarado no tradutor (models/normative/tradutor_synthseg_fs.json)"
+      "fonte": "domínio declarado na recentragem (models/normative/recentragem_synthseg.json)"
     },
     {
       "id": "confianca_baixa",

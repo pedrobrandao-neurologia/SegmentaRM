@@ -51,6 +51,7 @@ export async function testeLayout () {
       selo: [...document.querySelectorAll('#norm-table td[title]')].map(t => t.title).join(' | '),
       alertas: document.getElementById('alertas-panel').hidden === false,
       ic90: window.__segrm.norms.globals.some(g => Array.isArray(g.ic90)) && /IC 90%/.test(document.querySelector('#norm-table thead').textContent),
+      recentrado: window.__segrm.norms.globals.some(g => g.recentrado && isFinite(g.recentrado.desloc)) && !document.getElementById('recentragem-wrap').hidden,
       ic90diag: JSON.stringify({ n: window.__segrm.norms.globals.length, g0: window.__segrm.norms.globals[0] && Object.keys(window.__segrm.norms.globals[0]), th: document.querySelector('#norm-table thead').textContent }),
       calib: document.getElementById('calib-status').textContent
     }))
@@ -59,6 +60,7 @@ export async function testeLayout () {
     R.ok(nm.borda === true && /NÃO calibrado/.test(nm.selo), 'selo de proveniência com borda etária e sítio não calibrado' + (nm.borda === true && /NÃO calibrado/.test(nm.selo) ? '' : ` (borda ${nm.borda}; selo "${nm.selo.slice(0, 200)}")`))
     R.ok(nm.alertas, 'painel de alertas de QC visível')
     R.ok(nm.ic90, 'z com intervalo de 90% na tabela normativa' + (nm.ic90 ? '' : ` (${nm.ic90diag})`))
+    R.ok(nm.recentrado && /recentrado por controles do mesmo método/.test(nm.selo), 'z recentrado pelo método (nível A), com selo e opção visível')
     R.ok(/Protocolo deste exame/.test(nm.calib), 'painel de calibração mostra o protocolo')
 
     await p.selectOption('#surf-engine', 'edt')

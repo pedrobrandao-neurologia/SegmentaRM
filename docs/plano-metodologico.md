@@ -2,8 +2,8 @@
 
 Este documento responde, item por item, ao "Plano de modificações metodológicas" do
 SegmentaRM, na ordem das seções dele. Para cada item há um status e o porquê. Os números
-dos ajustes feitos com dados públicos estão em [`validacao/tradutor-dlbs.md`](validacao/tradutor-dlbs.md),
-gerado pelo próprio script de ajuste.
+dos ajustes feitos com dados públicos estão em [`validacao/dlbs.md`](validacao/dlbs.md),
+gerado pelos próprios scripts de ajuste.
 
 | Status | Significado |
 |---|---|
@@ -13,7 +13,7 @@ gerado pelo próprio script de ajuste.
 | **offline** | depende de coleta ou processamento fora do app (roteiro descrito) |
 
 A restrição central foi mantida: **nenhuma imagem sai do dispositivo**. Tudo o que é
-pesado (lote do SynthSeg em controles públicos, ajuste do tradutor e das referências) roda
+pesado (lote do SynthSeg em controles públicos, ajuste da recentragem e das referências) roda
 offline, em `tools/`, e só coeficientes entram em `models/normative/`.
 
 ---
@@ -21,7 +21,7 @@ offline, em `tools/`, e só coeficientes entram em `models/normative/`.
 ## §0. Instruções
 
 **Fases** — adaptado. A Fase 1 inteira foi feita. Das Fases 2–3 entrou o que não depende de
-trocar as redes: o QC por regras, os volumes suaves, o tradutor (nível A), a calibração do
+trocar as redes: o QC por regras, os volumes suaves, a recentragem pelo método (nível A), a calibração do
 sítio (nível C) e as referências do mesmo método para assimetria e HOC. Ficaram de fora a
 troca de pipeline (§2.1), o módulo hipocampal em *ensemble* (§4) e as normas próprias (nível B).
 
@@ -48,11 +48,11 @@ selo com:
 
 - norma e ferramenta com que ela foi medida;
 - ferramenta e tipo de volume do paciente;
-- se houve tradução de escala;
+- se o z foi recentrado por controles do mesmo método (nível A);
 - se o sítio está calibrado;
 - faixa etária da norma, com aviso de borda.
 
-Cada linha tem uma dica com o z sem tradução, o volume traduzido e os componentes do intervalo.
+Cada linha tem uma dica com o z sem recentragem, o deslocamento descontado e os componentes do intervalo.
 
 **"Verificar"** — feito para tudo o que foi usado:
 
@@ -68,7 +68,7 @@ Cada linha tem uma dica com o z sem tradução, o volume traduzido e os componen
 A leitura do plano se confirma com dados. Pusemos o SynthSeg do app lado a lado com o
 FreeSurfer em dois conjuntos públicos:
 
-- OpenNeuro ds000001/ds000005: FreeSurfer 6.0, 17 adultos jovens (`validacao/tradutor-dlbs.md`, checagem externa);
+- OpenNeuro ds000001/ds000005: FreeSurfer 6.0, 17 adultos jovens (`validacao/dlbs.md`, conjunto externo);
 - DLBS: FreeSurfer 5.3 com edição manual, controles de 21 a 89 anos.
 
 Os vieses são grandes e por estrutura:
@@ -85,9 +85,9 @@ As **medianas lobares idênticas** entre E e D tinham causa: as curvas regionais
 BrainChart são as mesmas para os dois hemisférios, e o "z lobar" somava médias e DP de
 parcelas. Esse z foi **removido** (§3.4).
 
-A tradução de escala (§3.2, nível A) corrige a maior parte do viés médio. O exame-índice é
-GE BRAVO, e o tradutor foi ajustado em Philips MPRAGE; por isso o laudo avisa (regra
-`tradutor_fora_do_dominio`) e recomenda a calibração do sítio (nível C).
+A recentragem pelo método (§3.2, nível A) corrige a maior parte do desvio médio. O
+exame-índice é GE BRAVO, e a recentragem foi ajustada em Philips MPRAGE; por isso o laudo
+avisa (regra `recentragem_fora_do_dominio`) e recomenda a calibração do sítio (nível C).
 
 ## §2. Precisão da segmentação
 
@@ -117,8 +117,8 @@ assimetria **do mesmo método** para parcelas (§2.6). O IA delas agora é descr
 
 Com o FreeSurfer 6.0 (16 adultos do ds000001), o suave ficou mais perto em várias estruturas: hipocampo
 +1,6% contra +6,9% do rígido; córtex +12,2% contra +20,3%. Não em todas: amígdala e córtex
-cerebelar ficaram mais longe. Não é "mais verdadeiro" em si, é a convenção oficial — e o
-tradutor absorve o que sobra.
+cerebelar ficaram mais longe. Não é "mais verdadeiro" em si, é a convenção oficial — e a
+recentragem absorve o que sobra.
 
 **§2.3 Resolução nativa e pré-processamento** — adaptado.
 
@@ -135,7 +135,7 @@ tradutor absorve o que sobra.
 
 - *Hipointensidades da SB.* O volume delas não pode ser reportado: o SynthSeg 1.0 não tem
   rótulo de lesão, e a FastSurferCNN daqui só parcela. Duas mitigações:
-  - o tradutor tem termos de idade, que absorvem o viés **médio** de hipointensidade
+  - a recentragem tem termos de idade, que absorvem o desvio **médio** de hipointensidade
     rotulada como cinzenta;
   - a regra `fronteira_sc_sb` avisa quando, aos 60 anos ou mais, o córtex está acima e a SB
     abaixo do esperado, e anexa cortes para conferir.
@@ -188,66 +188,76 @@ O laudo continua dizendo que o z inclui o efeito do tamanho da cabeça.
 
 ## §3. Comparação normativa
 
-**§3.2 Nível A — tradutor** — feito, com uma correção de método.
+**§3.2 Nível A** — feito, com o método trocado por evidência.
 
-*Dados.* 201 controles saudáveis do Dallas Lifespan Brain Study (OpenNeuro ds004856, CC0;
-Park et al., *Sci Data* 2025), com T1 público e volumes FreeSurfer 5.3 **editados à mão e
-revisados por outra equipe**:
+*Dados.* Controles saudáveis do Dallas Lifespan Brain Study (OpenNeuro ds004856, CC0; Park et
+al., *Sci Data* 2025), com T1 público e volumes FreeSurfer 5.3 **editados à mão e revisados
+por outra equipe**:
 
 - seleção estratificada por década, com idosos sobre-representados (`tools/dlbs_selecao.py`);
 - SynthSeg do app em lote (`tools/lote_synthseg_node.mjs`);
-- ajuste em `tools/tradutor_dlbs.py`.
+- preparação e comparação com o FreeSurfer em `tools/referencias_dlbs.py`;
+- ajuste da recentragem, com o código e as tabelas do próprio app, em `tools/recentragem_dlbs.mjs`.
 
-*Método — nem regressão preditiva nem Deming/Passing–Bablok.* O plano pedia uma reta
-simétrica (Deming/Passing–Bablok) e somava o erro residual à variância
-(σ² = σ²_norma + σ²_tradutor). Os dados levaram a outro desenho:
+O conjunto externo tem adultos jovens do OpenNeuro ds000001/ds000005: outro scanner, com
+FreeSurfer 6.0.
 
-- **A regressão preditiva E[FS | SS] encolhe o z** por ρ, por diluição de regressão. Um
-  paciente com z −3 no SynthSeg sairia com cerca de −2,7; com a inflação de variância do
-  plano, com cerca de −2,2.
-- **Uma reta simétrica copia a escala da ferramenta de referência *na amostra de ajuste*.**
-  No DLBS, o DP do FreeSurfer 5.3 nas subcorticais é inflado por ruído de segmentação:
-  caudado, putâmen, accumbens e hipocampo têm DP de 1,4 a 2 vezes o σ da própria norma
-  (CentileBrain), e a correlação com o SynthSeg vai de ~0 (accumbens, pálido D) a 0,8.
-  Reescalar pelo DP do FreeSurfer do DLBS inflaria o |z| na mesma proporção.
+*O que o plano pedia e o que os dados mostraram.* O plano pedia um tradutor
+SynthSeg → FreeSurfer (Deming/Passing–Bablok) antes de consultar as normas, com o erro
+residual somado à variância. Três achados mudaram o desenho:
 
-Usamos então um **deslocamento que depende da idade e do sexo, sem mudar a escala**:
+1. **A regressão preditiva E[FS | SS] encolhe o z** por ρ, por diluição de regressão. Um
+   paciente com z −3 sairia com cerca de −2,7; com a inflação σ² = σ²_norma + σ²_tradutor, com
+   cerca de −2,2.
+2. **Uma reta simétrica copia a escala do FreeSurfer da amostra de ajuste.** No DLBS, o DP do
+   FreeSurfer 5.3 nas subcorticais é inflado por ruído de segmentação: de 1,3 a 2 vezes o σ da
+   própria norma. A correlação com o SynthSeg vai de ~0 (accumbens, pálido) a ~0,8, e as
+   assimetrias E/D destoam das do ENIGMA (tálamo +17%, contra +4%). Reescalar por esse DP
+   inflaria o |z| na mesma proporção.
+3. **Nem o próprio FreeSurfer está em z ≈ 0 nestas normas.**
+   - Controles saudáveis medidos pelo FreeSurfer ficam de 1,4 a 1,9 DP abaixo da GMV do
+     BrainChart: −1,4 no FreeSurfer 5.3 do DLBS e −1,85 no 6.0 do conjunto externo.
+   - Com o FreeSurfer 5.3, também ficam longe no tálamo esquerdo (+1,9) e no pálido (−1,5 a −1,7).
+   - Traduzir o SynthSeg para a escala do FreeSurfer herdaria isso. Acima dos 73 anos, a
+     tradução daria córtex −1,6 e hipocampo −0,9 em pessoas saudáveis.
+
+*O que foi feito: recentragem do z contra a própria norma.* Os controles do DLBS medidos com
+o **mesmo SynthSeg do app** mostram, para cada estrutura e hemisfério, quanto o z deles se
+desloca da norma em função da idade e do sexo:
 
 ```
-log V_FS = log V_SS + a + c·t + d·t² + e·[M]     (t = idade − 60)
+z' = z − (a + c·t + d·t² + e·[M])     (t = idade − 60)
 ```
 
-A escala do z continua a da norma, que é quem define o que é "desvio" na população. O que o
-tradutor corrige é o **viés médio** entre as ferramentas, que chega a +19% no córtex e a −9%
-na SB.
+- é o mesmo princípio do escore *out-of-sample* do BrainChart e da calibração de sítio: um
+  deslocamento estimado em controles, com o modelo normativo fixo;
+- a escala do z continua a da norma;
+- a incerteza do deslocamento (bootstrap por sujeito) entra no IC 90%;
+- falhas grosseiras de segmentação saem do ajuste (|resíduo| > 5 DP robustos);
+- o arquivo registra o SHA-256 das normas usadas, e um teste falha se elas mudarem sem refazer o ajuste.
 
-Nas **subcorticais, o deslocamento é o mesmo nos dois hemisférios.** As assimetrias E/D do
-FreeSurfer 5.3 do DLBS destoam das do ENIGMA (tálamo +16,6% contra +4,2%; accumbens −26%
-contra −1,4%), e as do SynthSeg batem com o ENIGMA. Um ajuste por lado importaria esse
-artefato do DLBS para o z.
+*Validação* (`validacao/dlbs.md`, em controles saudáveis, onde o esperado é z ≈ 0):
 
-**O resíduo individual não entra no z**: ele mede o quanto um exame isolado difere do que o
-FreeSurfer mediria, e o z não pretende prever o FreeSurfer, e sim situar o paciente na norma.
-Entra no intervalo de 90% a incerteza do próprio deslocamento (bootstrap por sujeito,
-covariância de a, c, d e e).
+- no DLBS, em validação cruzada, o z médio de cada terço de idade fica perto de 0;
+- no conjunto externo, o |z| médio cai de ~0,7 para ~0,5.
 
-O relatório gerado (`validacao/tradutor-dlbs.md`) traz:
+O que sobra no conjunto externo é, sobretudo, efeito de sítio e protocolo, que só a
+calibração local remove. O caso mais evidente é o pálido: a medida do SynthSeg nele depende
+do contraste, e o desvio passa de −1,7 para +1,7 em adultos jovens de outro scanner. A
+comparação SynthSeg × FreeSurfer por estrutura (viés, correlação, DP) está no mesmo
+relatório; ela explica os z crus, mas não vira tradutor.
 
-- viés e erro de validação cruzada (10 partes) por terço de idade;
-- DP do SynthSeg, do FreeSurfer e da norma, lado a lado;
-- o deslocamento que um ajuste por lado daria;
-- a checagem externa com o FreeSurfer 6.0 (ds000001/ds000005), antes e depois da tradução.
+*Interações.*
 
-*Interações testadas.* Idade: sim, com termos linear e quadrático. **Campo e fabricante:
-não** — o DLBS é um só equipamento (Philips 3 T). Por isso o tradutor declara o próprio
-domínio e o laudo avisa quando o exame está fora dele. O plano sugeria FreeSurfer 7.x, mas
-não há T1 público com FreeSurfer 7 *editado* nessa escala. O FreeSurfer 5.3 editado do DLBS
-é a melhor referência aberta que encontramos, e a checagem externa com o FreeSurfer 6.0 dá
-a ordem de grandeza da diferença entre versões.
+- Idade: termos linear e quadrático.
+- Sexo: termo próprio.
+- **Campo e fabricante: não** — o DLBS é um só equipamento (Philips 3 T MPRAGE). Por isso a
+  recentragem declara o próprio domínio e o laudo avisa quando o exame está fora dele.
 
-*No app.* A tradução liga por padrão quando o volume é o suave do SynthSeg e pode ser
-desligada. O selo diz "tradução de escala (nível A) para FreeSurfer 5.3 editado (DLBS)", e
-cada linha mostra também o z sem tradução.
+*No app.* A recentragem liga por padrão quando o volume é o suave do SynthSeg e pode ser
+desligada. O selo diz "z recentrado por controles do mesmo método (nível A; DLBS, n = …)". Cada
+linha mostra também o z sem recentragem, e a coluna "Mediana" passa a ser a esperada para o
+mesmo método.
 
 **Nível B — normas próprias** — não viável agora. Exigiria processar milhares de exames de
 coortes com contratos de uso de dados (UK Biobank, ADNI, HCP-Aging) e ajustar GAMLSS com
@@ -294,7 +304,7 @@ normativo fixo.
     - ICC por estrutura, convertido em EPM_z = √(1 − ICC);
     - Kondrateva et al., arXiv 2025, entre scanners, conservador. Usa **entre scanners
       enquanto o sítio não está calibrado**;
-  - (iii) a incerteza da tradução (bootstrap);
+  - (iii) a incerteza da recentragem (bootstrap);
   - (iii) a incerteza da calibração (erro-padrão do deslocamento).
 
   O item (i), a incerteza do próprio modelo normativo, não entra: nem o BrainChart nem o
@@ -327,10 +337,10 @@ Feito:
 - intervalo de 90% (coluna "IC 90%");
 - percentis truncados;
 - multiplicidade;
-- limitações do exame como alertas de QC: borda etária, tradutor fora do domínio, VIC com
+- limitações do exame como alertas de QC: borda etária, recentragem ajustada em outro equipamento, VIC com
   aviso, desvios em bloco;
 - página de métodos e reprodutibilidade:
-  - SHA-256 de pesos, normas, tradutor, referências, erro de medida e regras;
+  - SHA-256 de pesos, normas, recentragem, referências, erro de medida e regras;
   - versão do app;
   - parâmetros de aquisição do DICOM;
   - família do protocolo;
@@ -340,9 +350,9 @@ Feito:
 
 | Item | Status |
 |---|---|
-| Concordância com FreeSurfer | **feito** (FreeSurfer 5.3 editado, DLBS; FreeSurfer 6.0, ds000001/ds000005) — `validacao/tradutor-dlbs.md` |
+| Concordância com FreeSurfer | **feito** (FreeSurfer 5.3 editado, DLBS; FreeSurfer 6.0, ds000001/ds000005) — `validacao/dlbs.md` |
 | Teste-reteste no BRAVO local | **offline** — voluntários locais; o intervalo usa valores publicados até lá |
-| 1,5 T × 3 T, fabricantes | **offline** — IXI/ADNI; o tradutor atual é só Philips 3 T |
+| 1,5 T × 3 T, fabricantes | **offline** — IXI/ADNI; a recentragem atual é só Philips 3 T (externo: Siemens, jovens) |
 | z de controles locais ~ N(0,1) | **feito** — o painel de calibração mostra média e DP dos z dos controles |
 | Validade clínica (AUC) | **offline** — ADNI |
 
@@ -375,7 +385,7 @@ próximo — a opção aceitável do plano.
 |---|---|
 | 1 — sanidade, suave, sem z lobar, selos, multiplicidade | **concluída** |
 | 2 — pipelines coerentes, VIC, QC real | QC por regras e inspeção guiada feitos; pipelines e VIC por segmentação não viáveis sem o SynthSeg 2.0 no navegador |
-| 3 — tradutor e curvas de Piot | tradutor feito (DLBS); curvas de Piot sem licença |
+| 3 — nível A e curvas de Piot | recentragem pelo método feita (DLBS); tradução para o FreeSurfer testada e rejeitada; curvas de Piot sem licença |
 | 4 — hipocampo | HOC e assimetria com referência do mesmo método; *ensemble* não viável |
 | 5 — normas próprias | não viável agora (dados com contrato de uso) |
 | 6 — controles locais e validação | módulo de calibração pronto; coleta local pendente |
@@ -392,8 +402,10 @@ mkdir -p t1 && while read u f; do curl -s -o "t1/$f" "$u"; done < urls.txt
 # 2. SynthSeg do app em lote (TensorFlow nativo; ~2 min por exame em 4 núcleos)
 npm i --no-save @tensorflow/tfjs-node@4.22.0
 node tools/lote_synthseg_node.mjs t1 res selecao.json
-# 3. ajuste (numpy, pandas, openpyxl) → models/normative/*.json e docs/validacao/tradutor-dlbs.md
-python3 tools/tradutor_dlbs.py --res res --fs Template_Structural_MRI.xlsx --selecao selecao.json \
-    --relatorio-md docs/validacao/tradutor-dlbs.md
+# 3. referências do mesmo método + dados por sujeito (numpy, pandas, openpyxl)
+python3 tools/referencias_dlbs.py --res res --fs Template_Structural_MRI.xlsx --selecao selecao.json \
+    --trabalho trab [--piloto <res de um conjunto externo> --piloto-fs <aseg.stats + participants>]
+# 4. recentragem do z com as normas do app → models/normative/recentragem_synthseg.json e docs/validacao/dlbs.md
+node tools/recentragem_dlbs.mjs --trabalho trab
 node tools/manifesto_sha256.mjs
 ```

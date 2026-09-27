@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Seleção estratificada do Dallas Lifespan Brain Study (OpenNeuro ds004856, CC0) para construir o
-tradutor SynthSeg → FreeSurfer e as referências do mesmo método (tools/tradutor_dlbs.py).
+recentragem pelo método e as referências do mesmo método (tools/referencias_dlbs.py).
 
   python3 tools/dlbs_selecao.py --participantes participants.tsv --fs Template_Structural_MRI.xlsx \
       --saida selecao.json --urls urls.txt
@@ -29,7 +29,7 @@ tem1 = set(g1.loc[g1['HasData'] == 1, 'S#'].astype(int))
 p['num'] = p['participant_id'].str.replace('sub-', '').astype(int)
 p['a1'] = pd.to_numeric(p['AgeMRI_W1'], errors='coerce')
 rng = np.random.default_rng(a.semente)
-# sub-752 fica de fora (exclusão da seleção original deste tradutor)
+# sub-752 fica de fora (exclusão da seleção original)
 w1 = p[p['num'].isin(tem1) & p['a1'].notna() & (p['num'] != 752)]
 cotas = {20: 15, 30: 15, 40: 15, 50: 25, 60: 30, 70: 40, 80: 999}
 sel = []

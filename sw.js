@@ -22,7 +22,7 @@ const SHELL = [
   './models/qc_rules.json', './models/manifest-sha256.json',
   './models/normative/brainchart.json',
   './models/normative/subcortical.json',
-  './models/normative/erro_medida.json', './models/normative/tradutor_synthseg_fs.json',
+  './models/normative/erro_medida.json', './models/normative/recentragem_synthseg.json',
   './models/normative/referencia_mesmo_metodo.json',
   './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',
   './brainchop/tensor-utils.js', './brainchop/bwlabels.js',

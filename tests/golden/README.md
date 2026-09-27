@@ -81,5 +81,5 @@ contado na grade da rede):
 O suave encolhe estruturas finas cercadas de tecido de outra classe (córtex, hipocampo,
 amígdala, accumbens: os voxels de fronteira contam só a fração da posterior) e aumenta a SB
 cerebelar e cerebral, que recebem as frações das vizinhas. É a convenção oficial do
-SynthSeg; o viés que sobra em relação ao FreeSurfer é o que o tradutor de escala corrige
-(`docs/validacao/tradutor-dlbs.md`).
+SynthSeg; o viés que sobra em relação às normas (medidas com o FreeSurfer) é o que a
+recentragem pelo método corrige (`docs/validacao/dlbs.md`).
