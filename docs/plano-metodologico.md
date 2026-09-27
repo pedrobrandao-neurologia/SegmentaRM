@@ -239,7 +239,7 @@ z' = z − (a + c·t + d·t² + e·[M])     (t = idade − 60)
 
 *Validação* (`validacao/dlbs.md`, em controles saudáveis, onde o esperado é z ≈ 0):
 
-- no DLBS, em validação cruzada, o z médio de cada terço de idade fica a ±0,13 de 0 — no
+- no DLBS, em validação cruzada, o z médio de cada terço de idade fica a ±0,14 de 0 — no
   terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
 - no conjunto externo, o |z| médio cai de 0,73 para 0,46.
 
