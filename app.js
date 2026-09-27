@@ -7,7 +7,7 @@ import { Niivue, NVImage, NVMesh, SLICE_TYPE } from './vendor/niivue.js'
 import { Dcm2niix } from './vendor/dcm2niix/index.jpeg.js'
 import { inferenceModelsList, brainChopOpts } from './brainchop/brainchop-parameters.js'
 import { assessQuality } from './lib/quality.js'
-import { computeStats, statsToCSV, statsToJSON, statsToWideRow } from './lib/stats.js'
+import { computeStats, statsToCSV, statsToJSON, statsToWideRow, AVISO_ESPESSURA } from './lib/stats.js'
 import { GROUP_PT, ptNameOf } from './lib/labels.js'
 import { writeNifti, gzipBuffer } from './lib/nifti-writer.js'
 import { tableToSav } from './lib/sav.js'
@@ -24,9 +24,9 @@ const VERSION = '1.0.0'
 // talairach.xfm). Reative aqui quando o passo estiver validado.
 const SURF_EXPORT = false
 // Espessura cortical volumétrica (passo 05): validada em fantomas, ainda sem comparação
-// com o FreeSurfer nos mesmos exames — aparece na tela, mas só entra nas exportações
-// quando esta chave for ligada.
-const THICK_EXPORT = false
+// com o FreeSurfer nos mesmos exames — exportada SEMPRE acompanhada do aviso
+// metodológico (AVISO_ESPESSURA, em lib/stats.js) no CSV, JSON, SAV, PDF e coorte.
+const THICK_EXPORT = true
 const $ = (id) => document.getElementById(id)
 
 // seleção de modelo → índice em inferenceModelsList (ids 1-based)
@@ -2160,7 +2160,8 @@ function metaNow () {
     caveats: [
       'Uso em pesquisa e ensino; não é dispositivo médico.',
       'Volumes de exames anisotrópicos têm erro maior; reporte sequência e resolução de origem.',
-      'Modelos treinados em T1; sequências T2/FLAIR degradam o resultado.'
+      'Modelos treinados em T1; sequências T2/FLAIR degradam o resultado.',
+      ...(THICK_EXPORT && state.thick ? [AVISO_ESPESSURA] : [])
     ]
   }
 }
