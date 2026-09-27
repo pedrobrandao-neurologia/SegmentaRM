@@ -431,8 +431,21 @@ continua válida.
 - **PDF** — laudo diagramado no estilo Apple (hierarquia por peso e tamanho, cartões
   arredondados, cor só com função: azul informa, laranja marca o atípico, vermelho o
   possível erro): capa com ficha do exame, captura e mostradores; QC por grupo tecidual;
-  comparação normativa com medidores P5–P50–P95; lobos; estruturas (com % do VIC);
-  assimetria em barras divergentes; espessura por região com régua E/D; métodos
+  comparação normativa com medidores P5–P50–P95; **volumes por região** agrupados por lobo
+  (frontal, temporal, parietal, occipital, ínsula) e depois por grupo tecidual, com
+  **esquerdo e direito lado a lado**, total, % do VIC e o **índice de assimetria como
+  coluna** (sem página própria); espessura por região, também por lobo, com régua E/D; métodos.
+  Tipografia **Inter** (SIL OFL 1.1, `fonts/inter/`), embutida com kerning, algarismos
+  tabulares e espaçamento pelas métricas dinâmicas da Inter — a alternativa aberta mais
+  próxima da SF Pro (a San Francisco e a Myriad não podem ser redistribuídas: a licença da
+  SF limita o uso às plataformas da Apple, e a Myriad é comercial da Adobe). O texto do PDF
+  continua pesquisável e copiável (ToUnicode); sem as fontes, o laudo cai na Helvetica.
+  `tools/inter_subset.py` regenera o subconjunto e o kerning.
+
+**Lobos.** As parcelas DKT são agrupadas em cinco lobos — frontal, temporal, parietal,
+occipital e ínsula —, com o cíngulo distribuído como nos lobos "estritos" do FreeSurfer:
+cíngulo anterior (rostral e caudal) no frontal, cíngulo posterior e istmo no parietal. A
+mesma convenção vale para os volumes por lobo do CSV/JSON e para as normas por lobo.
 
 **Espessura cortical volumétrica nas exportações.** A espessura por região DKT (passo 05)
 sai no CSV (linhas `espessura_volumetrica`), no JSON, no `.sav`/coorte (`thick_*`) e no PDF,
