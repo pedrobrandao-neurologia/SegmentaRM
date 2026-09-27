@@ -422,13 +422,27 @@ continua válida.
 
 ## Exportações
 
-- **CSV** longo (estrutura/agregado/lobo/assimetria/superfície; decimal configurável)
-- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria,
-  qualidade, proveniência do pré-processamento, normativo, superfície, ressalvas)
+- **CSV** longo (estrutura/agregado/lobo/assimetria/VIC/espessura volumétrica; decimal
+  configurável; coluna `pct_vic`)
+- **JSON** completo (estruturas com centroide RAS, agregados, lobos, assimetria, VIC,
+  qualidade, proveniência do pré-processamento, normativo, espessura, ressalvas)
 - **SPSS `.sav`** — escritor próprio (nomes longos, rótulos em português UTF-8), incluindo
-  `thick_*`/`surfarea_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
-- **PDF** — capa com captura e banner de QC, comparação normativa com réguas de percentil,
-  lobos, estruturas, assimetria, superfície cortical e página de métodos
+  `eTIV` e `thick_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
+- **PDF** — laudo diagramado no estilo Apple (hierarquia por peso e tamanho, cartões
+  arredondados, cor só com função: azul informa, laranja marca o atípico, vermelho o
+  possível erro): capa com ficha do exame, captura e mostradores; QC por grupo tecidual;
+  comparação normativa com medidores P5–P50–P95; lobos; estruturas (com % do VIC);
+  assimetria em barras divergentes; espessura por região com régua E/D; métodos
+
+**Espessura cortical volumétrica nas exportações.** A espessura por região DKT (passo 05)
+sai no CSV (linhas `espessura_volumetrica`), no JSON, no `.sav`/coorte (`thick_*`) e no PDF,
+**sempre com o aviso metodológico**: é um método volumétrico (Laplace + reconstrução de
+sulcos fechados), validado em fantomas, mas sem comparação sujeito a sujeito com o
+FreeSurfer — os valores absolutos podem diferir dos do recon-all/FastSurfer, então não os
+misture com espessuras de outro método. O aviso vai numa linha `nota_metodologica` do CSV,
+em `espessura_volumetrica.aviso_metodologico` do JSON, nos rótulos das variáveis do `.sav`,
+nas ressalvas e num cartão no topo da página de espessura do PDF. A malha 3D continua fora
+das exportações.
 - **NIfTI** — segmentação, conformado e intermediários (pré-processado nativo, MP-RAGE
   sintético, máscara, cérebro extraído, **norm sintético**) em `.nii.gz`
 - **QC `.csv`** — escore, confiança, coesão e simetria por grupo tecidual (uma linha por

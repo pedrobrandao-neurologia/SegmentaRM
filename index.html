@@ -140,8 +140,8 @@
     </section>
 
     <section class="step" id="step-surf">
-      <h2><b>05</b> Superfícies <span class="badge-exp" title="A reconstrução de superfícies está em revisão: a malha pode não corresponder ao córtex. Nada deste passo entra nas exportações.">em revisão</span></h2>
-      <p class="note warn-note"><b>Experimental.</b> A malha 3D ainda não é confiável; espessura, área e demais dados deste passo <b>não entram nas exportações</b> (CSV, JSON, SAV, PDF, ZIP e coorte vão até a parcelação DKT).</p>
+      <h2><b>05</b> Superfícies <span class="badge-exp" title="A malha 3D está em revisão e fica só na tela; a espessura volumétrica por região é exportada com aviso metodológico.">em revisão</span></h2>
+      <p class="note warn-note"><b>Experimental.</b> A malha 3D ainda não é confiável; a malha e os dados dela <b>não entram nas exportações</b>. A <b>espessura volumétrica por região DKT</b> entra, sempre com o aviso de método (Laplace, sem comparação sujeito a sujeito com o FreeSurfer).</p>
       <div class="field">
         <label for="surf-engine">Fonte das SDFs</label>
         <select id="surf-engine">
@@ -266,7 +266,7 @@
       </section>
 
       <section class="panel" id="surf-panel" hidden>
-        <h3>Espessura cortical — por região DKT <span class="badge-exp">em revisão · não exportado</span></h3>
+        <h3>Espessura cortical — por região DKT <span class="badge-exp" title="Exportada com aviso metodológico: método volumétrico, valores absolutos podem diferir do FreeSurfer">exportado com aviso</span></h3>
         <p class="note" id="thick-summary" style="margin:0 0 8px"></p>
         <div class="tablewrap" style="max-height:300px"><table id="surf-table"><thead></thead><tbody></tbody></table></div>
         <p class="note">Espessura <b>volumétrica</b> (sem malha): equação de Laplace entre a borda da
