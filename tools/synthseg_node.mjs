@@ -73,15 +73,16 @@ export function lerNifti (arquivo) {
 
 const det3 = (G) => Math.abs(G[0][0] * (G[1][1] * G[2][2] - G[1][2] * G[2][1]) - G[0][1] * (G[1][0] * G[2][2] - G[1][2] * G[2][0]) + G[0][2] * (G[1][0] * G[2][1] - G[1][1] * G[2][0]))
 
-/** segmenta um arquivo → { soft, hard, voxGrid, dimsNat, nTiles } (mm³ por estrutura) */
-export async function segmentar (rede, arquivo) {
+/** segmenta um arquivo → { soft, hard, voxGrid, dimsNat, nTiles } (mm³ por estrutura);
+ *  tile = 96 reproduz o app na variante "memória baixa" ou em GPUs com texturas de até 8192² */
+export async function segmentar (rede, arquivo, { tile = 128 } = {}) {
   const { tf, model, labels, runSynthSeg } = rede
   const nat = lerNifti(arquivo)
   const A = nat.affine
   const c = [0, 1, 2].map(r => A[r][0] * (nat.dims[0] - 1) / 2 + A[r][1] * (nat.dims[1] - 1) / 2 + A[r][2] * (nat.dims[2] - 1) / 2 + A[r][3])
   // grade de saída conformada 256³ LIA 1 mm centrada no volume (como o mri_convert --conform)
   const C = [[-1, 0, 0, c[0] + 127.5], [0, 0, 1, c[1] - 127.5], [0, -1, 0, c[2] + 127.5], [0, 0, 0, 1]]
-  const r = await runSynthSeg({ tf, model, img: null, dims: [256, 256, 256], affine: C, tile: 128, overlap: 64, flip: true, native: nat })
+  const r = await runSynthSeg({ tf, model, img: null, dims: [256, 256, 256], affine: C, tile, overlap: 64, flip: true, native: nat })
   const cnt = new Float64Array(256)
   for (let i = 0; i < r.gridSeg.length; i++) cnt[r.gridSeg[i]]++
   const det = det3(r.grid.affine)

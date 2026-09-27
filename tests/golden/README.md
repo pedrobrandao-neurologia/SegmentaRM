@@ -24,19 +24,89 @@ node tests/golden/run.mjs --atualizar         # grava a referência após mudan�
 
 npm i --no-save @tensorflow/tfjs-node@4.22.0
 node tests/golden/run.mjs --motor node        # o mesmo núcleo do SynthSeg em Node
+node tests/golden/motores.mjs --f16 --cpu     # equivalência navegador × Node num bloco real
+node tests/golden/motores.mjs --tamanho 96    # efeito do tamanho do bloco (exame inteiro, Node)
 ```
 
 **Dois motores, duas referências.** O motor do navegador roda o app completo (conformação,
-SynthSeg no WebGL, estatísticas) e é a referência de verdade — minutos com GPU, horas numa
-máquina sem GPU (o WebGL cai no SwiftShader). O motor Node roda o **mesmo**
-`lib/synthseg-core.js` com TensorFlow nativo: ~2–4 min por exame em CPU. Os volumes suaves
-(o valor principal) são somados na grade da rede e coincidem entre os motores a menos de
-arredondamento; os rígidos do motor Node são contados na grade da rede (no app, na grade
-conformada) — por isso cada motor tem a sua referência (`<id>.json` e `<id>.node.json`).
+SynthSeg, estatísticas): minutos com GPU. Sem GPU, o WebGL do Chromium é o SwiftShader
+(software), que o tfjs recusa (`failIfMajorPerformanceCaveat`), e o app cai no backend CPU
+em JavaScript. São cerca de 24 min por bloco de 128³ com o espelhado, e o exemplo tem 27
+blocos: cerca de 11 h. O motor Node roda o **mesmo** `lib/synthseg-core.js` com TensorFlow
+nativo, em ~2–5 min por exame em CPU. Os rígidos do motor Node são contados na grade da rede
+(no app, na grade conformada); por isso cada motor tem a sua referência. As do repositório
+são as do Node (`<id>.node.json`); a do navegador (`<id>.json`) é gravada na primeira
+execução, de preferência numa máquina com GPU. A equivalência entre os dois está medida
+abaixo.
 
 **O que é comparado.** O volume **rígido** (a segmentação em si) e o **principal** (suave
 quando a rede dá posteriores). Mudança só no principal = mudança de convenção de volume, não
 da segmentação. A tolerância padrão é 0,5% (`--tol`).
+
+## Equivalência entre os motores e tamanho do bloco (medidos)
+
+O lote do DLBS foi medido com o motor Node e blocos de 128³, e com ele os coeficientes da
+recentragem. `tests/golden/motores.mjs` verifica se o app no navegador dá os mesmos números:
+
+- um bloco real do exame, com o pré-processamento oficial do núcleo, vai idêntico aos motores;
+- cada motor roda a rede, a suavização e o top-3 do app;
+- a comparação é feita voxel a voxel e por estrutura, depois do pós-processamento do app.
+
+O recorte do exemplo sai igual nos dois motores: 209×256×208, o mesmo do log do app.
+
+**Motores.** Exame `exemplo`, bloco central de 96³, 28 estruturas com ≥ 500 voxels no bloco.
+É o bloco que o app usa quando a GPU aceita texturas de até 8192², como o SwiftShader.
+
+| Navegador × Node | rótulo igual | \|Δ posterior\| máx. | maior \|Δ\| do volume suave | Dice mínimo | tempo |
+|---|---:|---:|---:|---:|---:|
+| WebGL, 32 bits | 100% dos voxels | 1,5·10⁻⁵ (1 passo da quantização) | 0,00002% | 1,0000 | 288 s |
+| WebGL, 16 bits | 99,975% | 1,3·10⁻² | 0,14% (pálido E) | 0,9991 | 646 s |
+| CPU do tfjs (o app sem WebGL) | 100% | 1,5·10⁻⁵ | 0,00002% | 1,0000 | 307 s |
+
+O Node leva 1,6 s nesse bloco; os tempos do navegador são no SwiftShader, sem GPU. A linha
+de 16 bits usa `WEBGL_FORCE_F16_TEXTURES`, que imita GPUs sem float32 renderizável.
+
+- **Com float32**, que desktops e a maioria dos notebooks têm, o app e o motor Node dão o
+  mesmo volume.
+- **Com texturas de 16 bits**, a diferença fica abaixo de 0,2% por estrutura. Isso é bem
+  menos que o erro teste-reteste do SynthSeg no mesmo scanner: 0,45–1% nos volumes globais
+  e no tálamo (`models/normative/erro_medida.json`).
+
+**Tamanho do bloco.** Exame `exemplo` inteiro em Node (`--tamanho`): diferença do volume
+suave contra 128³, com E / D.
+
+| Estrutura | 96³ (150 blocos) | 160³ (8 blocos) | 192³ (8 blocos) |
+|---|---:|---:|---:|
+| Córtex cerebral | −0,3% / −0,3% | +0,2% / +0,1% | +0,2% / +0,1% |
+| SB cerebral | +0,0% / −0,1% | −0,1% / −0,1% | −0,1% / −0,1% |
+| Ventrículo lateral | −1,2% / −1,2% | +0,0% / +0,2% | +0,1% / +0,2% |
+| Corno temporal | −0,6% / +0,5% | −0,8% / −1,0% | −0,3% / −0,7% |
+| Córtex cerebelar | **−6,7% / −7,2%** | +0,3% / +0,2% | +0,3% / +0,2% |
+| SB cerebelar | −1,5% / −2,0% | +0,1% / +0,2% | +0,2% / +0,2% |
+| Tálamo | −1,3% / −0,8% | −0,5% / −0,3% | +0,1% / +0,2% |
+| Caudado | −0,2% / +0,0% | +0,1% / +0,1% | +0,1% / −0,0% |
+| Putâmen | +0,1% / +0,0% | +0,3% / −0,0% | +0,3% / +0,0% |
+| Pálido | **+2,8% / +1,4%** | +0,7% / +0,1% | −0,1% / −0,2% |
+| Hipocampo | +0,4% / +0,2% | +0,1% / +0,0% | −0,1% / −0,1% |
+| Amígdala | +0,4% / +0,6% | −0,2% / −0,5% | −0,5% / −0,4% |
+| Accumbens | +0,9% / +0,7% | +1,1% / +0,8% | +0,2% / +0,3% |
+| Diencéfalo ventral | +0,9% / +1,3% | +0,4% / +0,6% | −0,2% / −0,3% |
+| 3º ventrículo | −0,3% | −0,4% | −0,2% |
+| 4º ventrículo | +0,4% | +0,3% | +0,0% |
+| Tronco | +0,2% | +0,1% | −0,0% |
+| mediana \|Δ\| (todas as estruturas) | 0,62% | 0,16% | 0,19% |
+
+- **Com 160³ e 192³**, tudo fica a menos de ~1% de 128³. Com 128³, a rede já tem contexto
+  suficiente.
+- **Com 96³**, o córtex cerebelar perde 7%, o pálido ganha até 2,8%, e o tálamo e os
+  ventrículos perdem cerca de 1%.
+
+Blocos de 96³ são os do app na variante "memória baixa" e em GPUs com texturas de até 8192².
+Como a recentragem foi medida com 128³, o laudo avisa quando o bloco é menor (regra
+`bloco_reduzido` em `models/qc_rules.json`) e registra o bloco usado na reprodutibilidade.
+
+O volume inteiro num bloco só (224×256×224, como o `predict` oficial sem `--crop`) não coube
+em 15 GB de RAM no Node.
 
 ## O exame-índice (e qualquer exame local)
 

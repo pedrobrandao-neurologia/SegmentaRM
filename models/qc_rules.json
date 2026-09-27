@@ -97,6 +97,20 @@
       "fonte": "domínio declarado na recentragem (models/normative/recentragem_synthseg.json)"
     },
     {
+      "id": "bloco_reduzido",
+      "tipo": "bloco_reduzido",
+      "severidade": "atencao",
+      "titulo": "SynthSeg em blocos menores que os da recentragem",
+      "params": {
+        "blocoRef": 128
+      },
+      "mensagem": "A segmentação rodou em blocos de {bloco}³ ({motivo}); a recentragem e as referências do mesmo método foram medidas com blocos de {ref}³.",
+      "recomendacao": "Bloco menor dá à rede menos contexto e muda o volume de forma sistemática. No exame de exemplo, 96³ contra 128³ mudou o córtex cerebelar em −7%, a substância branca cerebelar em −2%, o pálido em +1,4 a +2,8% e o tálamo e os ventrículos laterais em cerca de −1%; com 160³ e 192³ as diferenças para 128³ ficaram abaixo de ~1%. Para laudo, refaça com \"Memória: Normal\" num computador cuja GPU aceite blocos de 128³ (texturas de 16384², a maioria das placas dedicadas e das integradas recentes).",
+      "capturas": [],
+      "status": "validado",
+      "fonte": "tests/golden/motores.mjs --tamanho 96, 160 e 192 no exame de exemplo (tests/golden/README.md); o bloco sai do limite de textura da GPU em workers/synthseg.worker.js"
+    },
+    {
       "id": "confianca_baixa",
       "tipo": "confianca_baixa",
       "severidade": "atencao",

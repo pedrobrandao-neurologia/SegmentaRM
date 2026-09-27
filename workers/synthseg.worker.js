@@ -9,7 +9,8 @@
 // dela) e a saída é amostrada na grade de `dims/affine` (o conformado); volumes em mm³.
 // Resposta: { cmd:'img', img: Uint8Array (canal 0–31), conf: Uint8Array (posterior
 //             máxima 0–255), volumes: Float64Array (volume "soft" por canal — equivalente
-//             ao --vol do oficial), volumesUnit: 'mm3' (caminho nativo) | 'voxels' }
+//             ao --vol do oficial), volumesUnit: 'mm3' (caminho nativo) | 'voxels',
+//             bloco: lado do bloco usado, blocoPedido: o pedido (a GPU pode reduzir) }
 // O pipeline (pré-processamento, blocos, TTA, suavização, pós-processamento) está em
 // lib/synthseg-core.js › runSynthSeg, o mesmo código exercitado pelos testes em Node.
 
@@ -71,7 +72,7 @@ self.onmessage = async (ev) => {
     })
     model.dispose()
     ui(`SynthSeg: inferência concluída em ${((performance.now() - t0) / 1000).toFixed(0)} s.`, 0.97)
-    self.postMessage({ cmd: 'img', img: seg, conf, volumes, volumesUnit }, [seg.buffer, conf.buffer, volumes.buffer])
+    self.postMessage({ cmd: 'img', img: seg, conf, volumes, volumesUnit, bloco: tileUse, blocoPedido: tile }, [seg.buffer, conf.buffer, volumes.buffer])
   } catch (e) {
     const msg = String((e && e.message) || e)
     const oom = /memory|memória|alloc|texture|context lost|contexto WebGL|OOM/i.test(msg)

@@ -29,7 +29,8 @@
           const volumes = new Float64Array(32)
           for (let i = 0; i < n; i++) volumes[out[i]] += 0.97
           window.__lastSynthsegMsg = { native: !!msg.native, nativeDims: msg.native && msg.native.dims, overlap: msg.overlap, flip: msg.flip }
-          emit({ cmd: 'img', img: out, conf, volumes, volumesUnit: 'mm3' })
+          // bloco usado = o pedido (sem GPU que o reduza)
+          emit({ cmd: 'img', img: out, conf, volumes, volumesUnit: 'mm3', bloco: msg.tile, blocoPedido: msg.tile })
         } else if (/fastsurfer/.test(this.url)) {
           const mask = msg.mask
           for (let i = 0; i < n; i++) if (mask[i]) { const y = ((i / 256) | 0) % 256; out[i] = 1 + ((y >> 3) % 34) }
