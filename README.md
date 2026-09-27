@@ -448,7 +448,7 @@ utilizável — na borda etária o intervalo real é maior.
 
 **Recentragem pelo método (nível A).** As normas são de volumes FreeSurfer, e o SynthSeg
 difere dele por estrutura, e de forma grande: o córtex fica ~14–23% acima (mais nos idosos) e a
-SB ~9% abaixo.
+SB ~7–12% abaixo.
 Sem correção, isso desloca os z de estruturas inteiras.
 
 A correção óbvia — traduzir o volume para a escala do FreeSurfer — **não funciona** com essas
@@ -476,8 +476,8 @@ Validação completa em [`docs/validacao/dlbs.md`](docs/validacao/dlbs.md), em c
 saudáveis:
 
 - no DLBS, em validação cruzada, o z médio fica perto de 0 em todos os terços de idade — no
-  terço mais velho (> 76 anos), o |z| médio cai de 0,83 para 0,07;
-- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,43.
+  terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
+- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,46.
 
 O que sobra é efeito de sítio. Por isso, quando o equipamento difere do DLBS (Philips 3 T
 MPRAGE), o laudo recomenda a calibração local.

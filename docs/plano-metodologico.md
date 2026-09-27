@@ -74,7 +74,7 @@ FreeSurfer em dois conjuntos públicos:
 Os vieses são grandes e por estrutura:
 
 - **córtex**: o SynthSeg mede cerca de 12–23% a mais, e o viés cresce com a idade no DLBS;
-- **substância branca**: mede de 4% a 11% a menos;
+- **substância branca**: mede de 4% a 12% a menos;
 - **ventrículos e corno temporal**: medem a mais.
 
 Isso basta para produzir o padrão do exame-índice: córtex e lobos com z positivo, SB com z
@@ -191,7 +191,7 @@ O laudo continua dizendo que o z inclui o efeito do tamanho da cabeça.
 **§3.2 Nível A** — feito, com o método trocado por evidência.
 
 *Dados.* Controles saudáveis do Dallas Lifespan Brain Study (OpenNeuro ds004856, CC0; Park et
-al., *Sci Data* 2025) — 101 nesta versão, de uma seleção de 201 —, com T1 público e volumes
+al., *Sci Data* 2025) — 201 controles de 21 a 89 anos —, com T1 público e volumes
 FreeSurfer 5.3 **editados à mão e revisados por outra equipe**:
 
 - seleção estratificada por década, com idosos sobre-representados (`tools/dlbs_selecao.py`);
@@ -210,16 +210,16 @@ residual somado à variância. Três achados mudaram o desenho:
    paciente com z −3 sairia com cerca de −2,7; com a inflação σ² = σ²_norma + σ²_tradutor, com
    cerca de −2,2.
 2. **Uma reta simétrica copia a escala do FreeSurfer da amostra de ajuste.** No DLBS, o DP do
-   FreeSurfer 5.3 nas subcorticais é inflado por ruído de segmentação: de 1,2 a 1,9 vezes o σ
-   da própria norma. A correlação com o SynthSeg vai de 0,2–0,3 (pálido, accumbens) a 0,9
-   (hipocampo), e as assimetrias E/D destoam das do ENIGMA (tálamo +17%, contra +4%; o SynthSeg
-   dá +5%). Reescalar por esse DP inflaria o |z| na mesma proporção.
+   FreeSurfer 5.3 nas subcorticais é inflado por ruído de segmentação: de 1,3 a 1,9 vezes o σ
+   da própria norma. A correlação com o SynthSeg vai de 0,3 (pálido) a 0,9 (hipocampo), e as
+   assimetrias E/D destoam das do ENIGMA (tálamo +18%, contra +4%; o SynthSeg dá +6%).
+   Reescalar por esse DP inflaria o |z| na mesma proporção.
 3. **Nem o próprio FreeSurfer está em z ≈ 0 nestas normas.**
    - Controles saudáveis medidos pelo FreeSurfer ficam abaixo da GMV do BrainChart: em média
      −1,5 DP no FreeSurfer 5.3 do DLBS e −1,85 no 6.0.1 do conjunto externo.
-   - Com o FreeSurfer 5.3, também ficam longe no tálamo esquerdo (+1,8) e no pálido (−1,4 a −1,6).
+   - Com o FreeSurfer 5.3, também ficam longe no tálamo esquerdo (+1,8) e no pálido (−1,4 a −1,9).
    - Traduzir o SynthSeg para a escala do FreeSurfer 5.3 levaria os controles, por construção,
-     a esses mesmos z. Acima dos 76 anos, isso significa córtex −1,7 e hipocampo −0,6/−0,9 em
+     a esses mesmos z. Acima dos 75 anos, isso significa córtex −1,7 e hipocampo −0,7/−0,8 em
      pessoas saudáveis.
 
 *O que foi feito: recentragem do z contra a própria norma.* Os controles do DLBS medidos com
@@ -239,13 +239,13 @@ z' = z − (a + c·t + d·t² + e·[M])     (t = idade − 60)
 
 *Validação* (`validacao/dlbs.md`, em controles saudáveis, onde o esperado é z ≈ 0):
 
-- no DLBS, em validação cruzada, o z médio de cada terço de idade fica perto de 0 — no terço
-  mais velho (> 76 anos), o |z| médio cai de 0,83 para 0,07;
-- no conjunto externo, o |z| médio cai de 0,73 para 0,43.
+- no DLBS, em validação cruzada, o z médio de cada terço de idade fica a ±0,14 de 0 — no
+  terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
+- no conjunto externo, o |z| médio cai de 0,73 para 0,46.
 
 O que sobra no conjunto externo é, sobretudo, efeito de sítio e protocolo, que só a
 calibração local remove. O caso mais evidente é o pálido: a medida do SynthSeg nele depende
-do contraste, e o desvio passa de −1,7 para +1,5 em adultos jovens de outro scanner. A
+do contraste, e o desvio passa de −1,7 para +1,9 em adultos jovens de outro scanner. A
 comparação SynthSeg × FreeSurfer por estrutura (viés, correlação, DP) está no mesmo
 relatório; ela explica os z crus, mas não vira tradutor.
 
