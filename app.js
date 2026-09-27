@@ -2113,6 +2113,21 @@ function renderNorms () {
   }
 }
 
+// fontes do laudo PDF (Inter, SIL OFL; subconjunto latino com algarismos tabulares e
+// kerning — ver tools/inter_subset.py). Falhou (offline sem cache)? O PDF usa Helvetica.
+let reportFontsP = null
+function loadReportFonts () {
+  if (!reportFontsP) {
+    const base = './fonts/inter/'
+    reportFontsP = Promise.all([
+      ...[400, 600, 700].map(w => fetch(`${base}Inter-${w}.ttf`).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer() })),
+      fetch(base + 'kern.json').then(r => r.ok ? r.json() : null).catch(() => null)
+    ]).then(([r, sb, b, k]) => ({ 400: r, 600: sb, 700: b, kern: k ? k.pares : null }))
+      .catch(e => { log('Fontes do laudo indisponíveis — o PDF usa Helvetica: ' + e.message); reportFontsP = null; return null })
+  }
+  return reportFontsP
+}
+
 function escapeXml (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 
 // ---------- exportações ----------
@@ -2202,7 +2217,7 @@ async function makeExports () {
       const { row, labels } = statsToWideRow(state.stats, meta)
       return tableToSav([row], labels, 'SegmentaRM ' + meta.subject)
     },
-    pdf: async () => buildReport({ stats: state.stats, meta, snapshot: await snapshotJpeg() }),
+    pdf: async () => buildReport({ stats: state.stats, meta, snapshot: await snapshotJpeg(), fonts: await loadReportFonts() }),
     niiSeg: async () => {
       const buf = writeNifti({ dims: dimsOf(state.conformed), pixDims: pixDimsOf(state.conformed), affine: affineOf(state.conformed), datatype: 'uint8', description: 'segmentarm ' + meta.model.slice(0, 40) }, state.seg)
       return await gzipBuffer(buf)
