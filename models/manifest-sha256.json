@@ -139,21 +139,21 @@
   },
   "recentragem": {
    "descricao": "Recentragem pelo método (nível A): desvio do z de controles do DLBS medidos com o mesmo SynthSeg",
-   "sha256": "bf536d0999a4c0f7b97a256e773a4b47313de109396776a34d71022b3c9bd3ee",
+   "sha256": "172b9b3b4deb1dd9297e88c96705e25c29e55f17c0cd057e86c4be4fe3d4be44",
    "arquivos": [
     {
      "arquivo": "models/normative/recentragem_synthseg.json",
-     "sha256": "709c17c1485c1183ccf1d65131341c1cff2e4cfd78688222c02470d20883110f"
+     "sha256": "a93c8f9d4811e22a54b458891f3e58a3bf11a2d64d74bc417f686a6907148db4"
     }
    ]
   },
   "referencia_mesmo_metodo": {
    "descricao": "Assimetria e HOC por idade — SynthSeg 1.0 do SegmentaRM em controles do DLBS",
-   "sha256": "255d8fba92ce182d102b9caf8b4f2e7266813d660509166ad2957a96484a7272",
+   "sha256": "7b3784b56950d3f77ca7b3dfe730d7326fce773dc90eb4604b091400486d6543",
    "arquivos": [
     {
      "arquivo": "models/normative/referencia_mesmo_metodo.json",
-     "sha256": "cad5718960a392f66373ee281b8cdaf9a6c625b0147a21999639ee53fcdadc05"
+     "sha256": "1cc0e9e520d84f957631cdda623b2b8f1c5a59ba995a8cb2257fe05c60a20482"
     }
    ]
   },
@@ -169,11 +169,11 @@
   },
   "regras_qc": {
    "descricao": "Regras declarativas de QC",
-   "sha256": "461306aabccb78b6f2337e6fb0df70d5bc3b97494fd25de708c247b3a24e54b5",
+   "sha256": "e1c5f24c6baa20172a49fb02614f2a6f4c347ab2111a698e37692b0ad4a1b089",
    "arquivos": [
     {
      "arquivo": "models/qc_rules.json",
-     "sha256": "3efaf742fd4b5279c1bb065989f984ab25d5e93573c88a066a5f0141ced74807"
+     "sha256": "2a49ed25489c68b1f3488e25b47a7bbe9917afd9e5aad5b8c7f6abb7c1ebed3b"
     }
    ]
   }

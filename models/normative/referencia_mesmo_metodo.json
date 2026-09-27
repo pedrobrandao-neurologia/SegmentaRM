@@ -3,170 +3,170 @@
  "gerado": "2026-09-27",
  "fonte": "Dallas Lifespan Brain Study (OpenNeuro ds004856 v1.3.0, CC0; Park DC et al., Sci Data 2025;12:846) — onda 1, T1 MPRAGE Philips 3 T; FreeSurfer 5.3 com edição manual e revisão independente (derivatives/brainsummary)",
  "fonteCurta": "DLBS (OpenNeuro ds004856, CC0)",
- "n": 67,
+ "n": 101,
  "idadeRef": 60.0,
  "idadeFaixa": [
   21,
   89
  ],
  "sexo": {
-  "F": 34,
-  "M": 33
+  "F": 47,
+  "M": 54
  },
  "metodo": "IA = 200·(E − D)/(E + D) do volume suave do SynthSeg 1.0 do SegmentaRM; média linear na idade; DP linear na idade (E|resíduo| = √(2/π)·σ); exclusão de |resíduo| > 5 DP robustos",
  "assimetria": {
   "estruturas": {
    "Thalamus": {
-    "media0": 6.29,
-    "media1": -0.10669,
-    "dp0": 5.9435,
-    "dp1": -0.07164,
-    "dpMin": 1.933,
-    "n": 67,
+    "media0": 5.7964,
+    "media1": -0.1073,
+    "dp0": 5.8456,
+    "dp1": -0.07392,
+    "dpMin": 1.851,
+    "n": 101,
     "guadalupe2017": {
      "media": 4.22,
      "dp": 6.0
     }
    },
    "Caudate": {
-    "media0": -1.6926,
-    "media1": 0.0153,
-    "dp0": 3.9743,
-    "dp1": 0.06492,
-    "dpMin": 0.721,
-    "n": 67,
+    "media0": -1.6255,
+    "media1": 0.02602,
+    "dp0": 4.1354,
+    "dp1": 0.06426,
+    "dpMin": 0.815,
+    "n": 101,
     "guadalupe2017": {
      "media": -1.9,
      "dp": 4.9
     }
    },
    "Putamen": {
-    "media0": 6.1465,
-    "media1": 0.03206,
-    "dp0": 5.0159,
-    "dp1": 0.06374,
-    "dpMin": 1.265,
-    "n": 67,
+    "media0": 5.9139,
+    "media1": 0.02493,
+    "dp0": 5.6079,
+    "dp1": 0.07153,
+    "dpMin": 1.409,
+    "n": 101,
     "guadalupe2017": {
      "media": 3.88,
      "dp": 5.66
     }
    },
    "Pallidum": {
-    "media0": -9.2538,
-    "media1": 0.04541,
-    "dp0": 19.4307,
-    "dp1": 0.11856,
-    "dpMin": 7.403,
-    "n": 67,
+    "media0": -6.9898,
+    "media1": 0.07863,
+    "dp0": 18.0741,
+    "dp1": 0.09873,
+    "dpMin": 7.112,
+    "n": 101,
     "guadalupe2017": {
      "media": 3.6,
      "dp": 10.39
     }
    },
    "Hippocampus": {
-    "media0": -3.0299,
-    "media1": -0.04993,
-    "dp0": 5.9021,
-    "dp1": 0.06661,
-    "dpMin": 1.652,
-    "n": 67,
+    "media0": -3.0432,
+    "media1": -0.0176,
+    "dp0": 5.803,
+    "dp1": 0.04836,
+    "dpMin": 1.958,
+    "n": 100,
     "guadalupe2017": {
      "media": -1.32,
      "dp": 5.66
     }
    },
    "Amygdala": {
-    "media0": -5.0023,
-    "media1": -0.04063,
-    "dp0": 9.4645,
-    "dp1": 0.10607,
-    "dpMin": 2.664,
-    "n": 67,
+    "media0": -4.1858,
+    "media1": -0.02158,
+    "dp0": 8.5886,
+    "dp1": 0.06444,
+    "dpMin": 3.038,
+    "n": 101,
     "guadalupe2017": {
      "media": -4.1,
      "dp": 10.39
     }
    },
    "Accumbens-area": {
-    "media0": 0.3658,
-    "media1": -0.02065,
-    "dp0": 11.9754,
-    "dp1": 0.1309,
-    "dpMin": 3.435,
-    "n": 67,
+    "media0": 0.8698,
+    "media1": -0.01649,
+    "dp0": 11.3305,
+    "dp1": 0.11973,
+    "dpMin": 3.33,
+    "n": 101,
     "guadalupe2017": {
      "media": -1.44,
      "dp": 15.62
     }
    },
    "VentralDC": {
-    "media0": 2.334,
-    "media1": 0.04619,
-    "dp0": 5.8664,
-    "dp1": 0.00012,
-    "dpMin": 2.931,
-    "n": 67
+    "media0": 2.3017,
+    "media1": 0.04297,
+    "dp0": 5.6033,
+    "dp1": 0.01443,
+    "dpMin": 2.52,
+    "n": 101
    },
    "Lateral-Ventricle": {
-    "media0": 6.2818,
-    "media1": 0.03791,
-    "dp0": 15.7807,
-    "dp1": -0.02491,
-    "dpMin": 7.529,
-    "n": 67
+    "media0": 6.8573,
+    "media1": 0.0046,
+    "dp0": 15.9449,
+    "dp1": -0.04921,
+    "dpMin": 7.259,
+    "n": 101
    },
    "Inf-Lat-Vent": {
-    "media0": 0.7493,
-    "media1": 0.09987,
-    "dp0": 21.8918,
-    "dp1": 0.07366,
-    "dpMin": 9.509,
-    "n": 67
+    "media0": -2.2385,
+    "media1": 0.10068,
+    "dp0": 22.1383,
+    "dp1": 0.01742,
+    "dpMin": 10.729,
+    "n": 101
    },
    "Cerebral-Cortex": {
-    "media0": -0.2054,
-    "media1": -0.0002,
-    "dp0": 0.99,
-    "dp1": -0.00205,
-    "dpMin": 0.465,
-    "n": 66
+    "media0": -0.2122,
+    "media1": 0.00433,
+    "dp0": 0.9687,
+    "dp1": 0.00164,
+    "dpMin": 0.452,
+    "n": 99
    },
    "Cerebral-White-Matter": {
-    "media0": -0.0849,
-    "media1": 0.0027,
-    "dp0": 0.9543,
-    "dp1": -0.0032,
-    "dpMin": 0.431,
-    "n": 66
+    "media0": -0.2624,
+    "media1": 0.00223,
+    "dp0": 1.1378,
+    "dp1": -0.00209,
+    "dpMin": 0.539,
+    "n": 101
    },
    "Cerebellum-Cortex": {
-    "media0": 0.7233,
-    "media1": 0.0188,
-    "dp0": 3.0736,
-    "dp1": 0.00915,
-    "dpMin": 1.358,
-    "n": 67
+    "media0": 0.8064,
+    "media1": 0.02196,
+    "dp0": 3.2567,
+    "dp1": 0.0082,
+    "dpMin": 1.468,
+    "n": 101
    },
    "Cerebellum-White-Matter": {
-    "media0": -0.2688,
-    "media1": -0.00156,
-    "dp0": 3.0659,
-    "dp1": 0.00944,
-    "dpMin": 1.349,
-    "n": 67
+    "media0": -0.4119,
+    "media1": 0.0025,
+    "dp0": 2.9742,
+    "dp1": 0.00999,
+    "dpMin": 1.292,
+    "n": 101
    }
   },
   "diagnostico": {
    "Thalamus": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 6.13,
-    "dp": 6.44,
+    "media": 5.52,
+    "dp": 6.33,
     "inclinacao_por_decada": -1.07,
     "fs53": {
-     "media": 17.24,
-     "dp": 13.44
+     "media": 16.56,
+     "dp": 13.27
     },
     "guadalupe2017": {
      "media": 4.22,
@@ -174,14 +174,14 @@
     }
    },
    "Caudate": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": -1.67,
-    "dp": 4.49,
-    "inclinacao_por_decada": 0.15,
+    "media": -1.56,
+    "dp": 4.61,
+    "inclinacao_por_decada": 0.26,
     "fs53": {
-     "media": 5.67,
-     "dp": 17.76
+     "media": 5.49,
+     "dp": 17.15
     },
     "guadalupe2017": {
      "media": -1.9,
@@ -189,14 +189,14 @@
     }
    },
    "Putamen": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 6.19,
-    "dp": 5.77,
-    "inclinacao_por_decada": 0.32,
+    "media": 5.98,
+    "dp": 6.07,
+    "inclinacao_por_decada": 0.25,
     "fs53": {
-     "media": -0.6,
-     "dp": 21.12
+     "media": -1.47,
+     "dp": 21.52
     },
     "guadalupe2017": {
      "media": 3.88,
@@ -204,14 +204,14 @@
     }
    },
    "Pallidum": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": -9.19,
-    "dp": 20.02,
-    "inclinacao_por_decada": 0.45,
+    "media": -6.79,
+    "dp": 18.7,
+    "inclinacao_por_decada": 0.79,
     "fs53": {
-     "media": -0.58,
-     "dp": 30.77
+     "media": 0.31,
+     "dp": 29.45
     },
     "guadalupe2017": {
      "media": 3.6,
@@ -219,14 +219,14 @@
     }
    },
    "Hippocampus": {
-    "n": 67,
-    "excluidos": 0,
-    "media": -3.1,
-    "dp": 6.26,
-    "inclinacao_por_decada": -0.5,
+    "n": 100,
+    "excluidos": 1,
+    "media": -3.09,
+    "dp": 6.15,
+    "inclinacao_por_decada": -0.18,
     "fs53": {
-     "media": -1.67,
-     "dp": 10.7
+     "media": -2.11,
+     "dp": 11.81
     },
     "guadalupe2017": {
      "media": -1.32,
@@ -234,14 +234,14 @@
     }
    },
    "Amygdala": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": -5.06,
-    "dp": 10.2,
-    "inclinacao_por_decada": -0.41,
+    "media": -4.24,
+    "dp": 9.36,
+    "inclinacao_por_decada": -0.22,
     "fs53": {
-     "media": -8.65,
-     "dp": 17.13
+     "media": -8.93,
+     "dp": 18.25
     },
     "guadalupe2017": {
      "media": -4.1,
@@ -249,14 +249,14 @@
     }
    },
    "Accumbens-area": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 0.34,
-    "dp": 12.78,
-    "inclinacao_por_decada": -0.21,
+    "media": 0.83,
+    "dp": 12.11,
+    "inclinacao_por_decada": -0.16,
     "fs53": {
-     "media": -22.26,
-     "dp": 41.1
+     "media": -16.64,
+     "dp": 39.25
     },
     "guadalupe2017": {
      "media": -1.44,
@@ -264,72 +264,72 @@
     }
    },
    "VentralDC": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 2.4,
-    "dp": 6.15,
-    "inclinacao_por_decada": 0.46,
+    "media": 2.41,
+    "dp": 5.84,
+    "inclinacao_por_decada": 0.43,
     "fs53": {
-     "media": 1.94,
-     "dp": 15.35
+     "media": 2.24,
+     "dp": 14.71
     }
    },
    "Lateral-Ventricle": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 6.34,
-    "dp": 17.42,
-    "inclinacao_por_decada": 0.38,
+    "media": 6.87,
+    "dp": 17.17,
+    "inclinacao_por_decada": 0.05,
     "fs53": {
-     "media": 5.65,
-     "dp": 22.86
+     "media": 6.24,
+     "dp": 22.59
     }
    },
    "Inf-Lat-Vent": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 0.9,
-    "dp": 23.28,
-    "inclinacao_por_decada": 1.0,
+    "media": -1.98,
+    "dp": 24.1,
+    "inclinacao_por_decada": 1.01,
     "fs53": {
-     "media": 13.85,
-     "dp": 47.49
+     "media": 11.82,
+     "dp": 51.43
     }
    },
    "Cerebral-Cortex": {
-    "n": 66,
-    "excluidos": 1,
-    "media": -0.21,
-    "dp": 1.03,
-    "inclinacao_por_decada": -0.0
+    "n": 99,
+    "excluidos": 2,
+    "media": -0.2,
+    "dp": 1.04,
+    "inclinacao_por_decada": 0.04
    },
    "Cerebral-White-Matter": {
-    "n": 66,
-    "excluidos": 1,
-    "media": -0.08,
-    "dp": 0.94,
-    "inclinacao_por_decada": 0.03
+    "n": 101,
+    "excluidos": 0,
+    "media": -0.26,
+    "dp": 1.22,
+    "inclinacao_por_decada": 0.02
    },
    "Cerebellum-Cortex": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": 0.75,
-    "dp": 3.15,
-    "inclinacao_por_decada": 0.19,
+    "media": 0.86,
+    "dp": 3.21,
+    "inclinacao_por_decada": 0.22,
     "fs53": {
-     "media": -1.92,
-     "dp": 4.89
+     "media": -2.79,
+     "dp": 4.87
     }
    },
    "Cerebellum-White-Matter": {
-    "n": 67,
+    "n": 101,
     "excluidos": 0,
-    "media": -0.27,
-    "dp": 3.01,
-    "inclinacao_por_decada": -0.02,
+    "media": -0.41,
+    "dp": 3.04,
+    "inclinacao_por_decada": 0.02,
     "fs53": {
-     "media": -4.79,
-     "dp": 15.43
+     "media": -4.38,
+     "dp": 14.36
     }
    }
   }
@@ -338,22 +338,22 @@
   "definicao": "HOC = V_hipocampo / (V_hipocampo + V_corno_temporal), volume suave; média quadrática e DP linear na idade",
   "lados": {
    "E": {
-    "media0": 0.86233,
-    "media1": -0.0020916,
-    "media2": -4.036e-05,
-    "dp0": 0.03182,
-    "dp1": 0.0004711,
-    "dpMin": 0.0067,
-    "n": 64
+    "media0": 0.8569,
+    "media1": -0.0023168,
+    "media2": -3.9448e-05,
+    "dp0": 0.04011,
+    "dp1": 0.0007857,
+    "dpMin": 0.0047,
+    "n": 98
    },
    "D": {
-    "media0": 0.86289,
-    "media1": -0.0019233,
-    "media2": -3.5233e-05,
-    "dp0": 0.0389,
-    "dp1": 0.0006554,
-    "dpMin": 0.0067,
-    "n": 65
+    "media0": 0.85421,
+    "media1": -0.0023759,
+    "media2": -4.2037e-05,
+    "dp0": 0.0511,
+    "dp1": 0.0010971,
+    "dpMin": 0.0042,
+    "n": 100
    }
   }
  }

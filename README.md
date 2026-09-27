@@ -447,13 +447,14 @@ Não inclui a incerteza do próprio modelo normativo, que as normas não publica
 utilizável — na borda etária o intervalo real é maior.
 
 **Recentragem pelo método (nível A).** As normas são de volumes FreeSurfer, e o SynthSeg
-difere dele por estrutura, e de forma grande: o córtex fica ~15–20% acima e a SB ~9% abaixo.
+difere dele por estrutura, e de forma grande: o córtex fica ~14–23% acima (mais nos idosos) e a
+SB ~9% abaixo.
 Sem correção, isso desloca os z de estruturas inteiras.
 
 A correção óbvia — traduzir o volume para a escala do FreeSurfer — **não funciona** com essas
-normas. Controles saudáveis medidos pelo próprio FreeSurfer ficam de 1,4 a 1,9 DP abaixo da GMV
-do BrainChart, tanto no FreeSurfer 5.3 do DLBS quanto no 6.0 de outro conjunto. Traduzir para
-essa escala criaria atrofia cortical em quem não tem.
+normas. Controles saudáveis medidos pelo próprio FreeSurfer ficam, em média, 1,5 DP (FreeSurfer
+5.3 do DLBS) e 1,9 DP (FreeSurfer 6.0.1 de outro conjunto) abaixo da GMV do BrainChart.
+Traduzir para essa escala criaria atrofia cortical em quem não tem.
 
 Por isso o app recentra o z contra a **própria norma**. Controles saudáveis do **Dallas
 Lifespan Brain Study** (OpenNeuro ds004856, CC0; 21–89 anos), medidos com o **mesmo SynthSeg
@@ -474,8 +475,9 @@ cada linha mostra também o z sem recentragem.
 Validação completa em [`docs/validacao/dlbs.md`](docs/validacao/dlbs.md), em controles
 saudáveis:
 
-- no DLBS, por validação cruzada, o z médio fica perto de 0 em todos os terços de idade;
-- num conjunto externo de outro scanner, o |z| médio cai de ~0,7 para ~0,5.
+- no DLBS, em validação cruzada, o z médio fica perto de 0 em todos os terços de idade — no
+  terço mais velho (> 76 anos), o |z| médio cai de 0,83 para 0,07;
+- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,43.
 
 O que sobra é efeito de sítio. Por isso, quando o equipamento difere do DLBS (Philips 3 T
 MPRAGE), o laudo recomenda a calibração local.

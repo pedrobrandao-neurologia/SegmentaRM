@@ -91,7 +91,7 @@
       "titulo": "Recentragem ajustada em outro equipamento",
       "params": {},
       "mensagem": "A recentragem pelo método (nível A) foi ajustada em controles de {dominio}; este exame: {difs}.",
-      "recomendacao": "O desvio entre o SynthSeg e a norma depende do contraste da sequência (fronteira cinzenta/branca) e pode não ser o mesmo neste equipamento — num conjunto externo de adultos jovens (Siemens), restaram desvios de até ~1 DP em algumas estruturas. Enquanto o sítio não for calibrado com controles locais (nível C), trate desvios pequenos (|z| < 2) com cautela.",
+      "recomendacao": "O desvio entre o SynthSeg e a norma depende do contraste da sequência (fronteira cinzenta/branca) e pode não ser o mesmo neste equipamento — num conjunto externo de adultos jovens de outro scanner, a recentragem deixou desvios de até ~1,5 DP (pálido) em algumas estruturas. Enquanto o sítio não for calibrado com controles locais (nível C), trate desvios pequenos (|z| < 2) com cautela.",
       "capturas": [],
       "status": "validado",
       "fonte": "domínio declarado na recentragem (models/normative/recentragem_synthseg.json)"

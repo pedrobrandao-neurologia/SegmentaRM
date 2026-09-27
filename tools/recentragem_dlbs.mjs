@@ -84,8 +84,11 @@ function robustos (v) {
 }
 
 // ---------- ajuste por estrutura ----------
+// terços de idade: os mesmos cortes da comparação com o FreeSurfer (referencias_dlbs.py), se houver
+const diagPy = fs.existsSync(path.join(TRAB, 'dlbs_diag.json')) ? JSON.parse(fs.readFileSync(path.join(TRAB, 'dlbs_diag.json'), 'utf8')) : null
 const idadesOrd = suj.map(s => s.idade).sort((a, b) => a - b)
-const terc = [idadesOrd[Math.floor(idadesOrd.length / 3)], idadesOrd[Math.floor(2 * idadesOrd.length / 3)]]
+const cortesPy = diagPy && diagPy.comparacaoFS && Object.values(diagPy.comparacaoFS)[0] && Object.values(diagPy.comparacaoFS)[0].tercos_idade
+const terc = cortesPy || [idadesOrd[Math.floor(idadesOrd.length / 3)], idadesOrd[Math.floor(2 * idadesOrd.length / 3)]]
 const tercoDe = (idade) => idade <= terc[0] ? 0 : idade <= terc[1] ? 1 : 2
 const chaves = [...new Set(suj.flatMap(s => Object.keys(s.zss)))]
 const estruturas = {}; const diag = {}
@@ -126,10 +129,12 @@ for (const chave of chaves) {
     a: r4(beta[0]), c: +beta[1].toPrecision(5), d: +beta[2].toPrecision(5), e: r4(beta[3]),
     cov: cov.map(row => row.map(v => +v.toPrecision(4))), n: dados.length, excluidos, dpResiduo: +dp(cv).toFixed(3)
   }
-  const zfsD = suj.filter(s => s.zfs[chave] != null).map(s => s.zfs[chave])
+  const comFs = suj.filter(s => s.zfs[chave] != null)
+  const zfsD = comFs.map(s => s.zfs[chave])
   diag[chave] = {
     n: dados.length, excluidos,
     dlbsCru: [media(y), dp(y)], dlbsFs: zfsD.length ? [media(zfsD), dp(zfsD)] : null,
+    fsTercos: zfsD.length ? porTerco(zfsD, comFs) : null,
     cruTercos: porTerco(y, dados), vcTercos: porTerco(cv, dados), dpVc: dp(cv),
     desloc30F: dot(lin(30, 'F'), beta), desloc60F: dot(lin(60, 'F'), beta), desloc85F: dot(lin(85, 'F'), beta), sexoM: beta[3],
     externo: e.length ? { n: e.length, cru: [media(e.map(s => s.zss[chave])), dp(e.map(s => s.zss[chave]))], recentrado: [media(eRec), dp(eRec)], fs: sujE.some(s => s.zfs[chave] != null) ? media(sujE.filter(s => s.zfs[chave] != null).map(s => s.zfs[chave])) : null } : null
@@ -166,22 +171,23 @@ L.push(`**Amostra:** ${dlbs.n} controles saudáveis do Dallas Lifespan Brain Stu
   `${sujE.length} adultos jovens (19–30 anos) do OpenNeuro ds000001/ds000005, outro scanner, com FreeSurfer 6.0.1 dos derivados públicos do OpenNeuro. Todos os z usam as tabelas e o código do app.`, '')
 L.push('## Por que recentrar, e não traduzir para a escala do FreeSurfer', '')
 L.push('z médio (DP) de pessoas **saudáveis** contra as normas embarcadas — o esperado, se o método e a norma estivessem na mesma escala, é média 0 e DP 1. ' +
-  'O próprio FreeSurfer fica longe disso no córtex (GMV do BrainChart), nos dois conjuntos, e em várias subcorticais no DLBS: traduzir o SynthSeg para a ' +
-  'escala do FreeSurfer herdaria esses desvios. O nível A recentra contra a **própria norma**, com controles medidos pelo mesmo método do paciente.', '')
-L.push('| Medida | DLBS: SynthSeg cru | DLBS: FreeSurfer 5.3 | externo: SynthSeg cru | externo: FreeSurfer 6.0 |', '|---|---:|---:|---:|---:|')
+  'O próprio FreeSurfer fica longe disso no córtex (GMV do BrainChart), nos dois conjuntos, e em várias subcorticais no DLBS. Traduzir o SynthSeg para a ' +
+  'escala do FreeSurfer 5.3 levaria os controles, por construção, aos z das colunas do FreeSurfer — herdaria esses desvios. O nível A recentra contra a ' +
+  '**própria norma**, com controles medidos pelo mesmo método do paciente.', '')
+L.push(`| Medida | DLBS: SynthSeg cru | DLBS: FreeSurfer 5.3 | FreeSurfer 5.3, > ${terc[1].toFixed(0)} anos | externo: SynthSeg cru | externo: FreeSurfer 6.0.1 |`, '|---|---:|---:|---:|---:|---:|')
 for (const [k, d] of Object.entries(diag)) {
-  L.push(`| ${nome(k)} | ${f1(d.dlbsCru[0])} (${f2(d.dlbsCru[1])}) | ${d.dlbsFs ? `${f1(d.dlbsFs[0])} (${f2(d.dlbsFs[1])})` : '—'} | ${d.externo ? `${f1(d.externo.cru[0])} (${f2(d.externo.cru[1])})` : '—'} | ${d.externo ? f1(d.externo.fs) : '—'} |`)
+  L.push(`| ${nome(k)} | ${f1(d.dlbsCru[0])} (${f2(d.dlbsCru[1])}) | ${d.dlbsFs ? `${f1(d.dlbsFs[0])} (${f2(d.dlbsFs[1])})` : '—'} | ${d.fsTercos ? f1(d.fsTercos[2]) : '—'} | ${d.externo ? `${f1(d.externo.cru[0])} (${f2(d.externo.cru[1])})` : '—'} | ${d.externo ? f1(d.externo.fs) : '—'} |`)
 }
 L.push('', '## Recentragem (nível A): validação', '')
 L.push('Deslocamento (em z) que o app desconta, para uma mulher aos 30, 60 e 85 anos, e o termo de sexo masculino. Validação cruzada (10 partes) no DLBS: ' +
   'z médio depois da recentragem por terço de idade (o esperado é 0) e DP. Externo: z médio (DP) antes e depois.', '')
-L.push(`| Medida | n | desloc. 30 · 60 · 85 anos | masc. | VC por terço (≤${terc[0]} · ${terc[0]}–${terc[1]} · >${terc[1]}) | DP VC | externo: cru → recentrado |`, '|---|---:|---|---:|---|---:|---|')
+L.push(`| Medida | n | desloc. 30 · 60 · 85 anos | masc. | VC por terço (≤ ${terc[0].toFixed(0)} · ${terc[0].toFixed(0)}–${terc[1].toFixed(0)} · > ${terc[1].toFixed(0)}) | DP VC | externo: cru → recentrado |`, '|---|---:|---|---:|---|---:|---|')
 for (const [k, d] of Object.entries(diag)) {
   L.push(`| ${nome(k)} | ${d.n}${d.excluidos ? ` (−${d.excluidos})` : ''} | ${[d.desloc30F, d.desloc60F, d.desloc85F].map(f1).join(' · ')} | ${f1(d.sexoM)} | ${d.vcTercos.map(f1).join(' · ')} | ${f2(d.dpVc)} | ${d.externo ? `${f1(d.externo.cru[0])} → ${f1(d.externo.recentrado[0])} (${f2(d.externo.recentrado[1])})` : '—'} |`)
 }
 L.push('', `**Resumo.** |z| médio dos controles externos: ${f2(absMedia(d => d.externo && d.externo.cru[0]))} sem recentragem → ${f2(absMedia(d => d.externo && d.externo.recentrado[0]))} com recentragem; ` +
-  `no terço mais velho do DLBS (> ${terc[1]} anos), em validação cruzada: ${f2(absMedia(d => d.cruTercos[2]))} → ${f2(absMedia(d => d.vcTercos[2]))}. O que resta no conjunto externo ` +
-  '(outro fabricante, adultos jovens) é o desvio próprio de cada sítio e protocolo — por isso a calibração com controles locais (nível C) continua necessária para uso sério.', '')
+  `no terço mais velho do DLBS (> ${terc[1].toFixed(0)} anos), em validação cruzada: ${f2(absMedia(d => d.cruTercos[2]))} → ${f2(absMedia(d => d.vcTercos[2]))}. O que resta no conjunto externo ` +
+  '(outro scanner e protocolo, adultos jovens) é o desvio próprio de cada sítio e protocolo — por isso a calibração com controles locais (nível C) continua necessária para uso sério.', '')
 L.push(fs.readFileSync(path.join(TRAB, 'dlbs_parte_py.md'), 'utf8'))
 L.push('## Como regenerar', '', 'Veja `docs/plano-metodologico.md` ("Como regenerar os coeficientes").', '')
 fs.mkdirSync(path.dirname(RELATORIO), { recursive: true })
