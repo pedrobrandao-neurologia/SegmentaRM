@@ -18,6 +18,7 @@ const COMPONENTES = {
   normas_brainchart: { descricao: 'BrainChart — quantis tabelados (Bethlehem et al., Nature 2022)', arquivos: ['models/normative/brainchart.json'] },
   normas_centilebrain: { descricao: 'CentileBrain — quantis subcorticais (Ge et al., 2024)', arquivos: ['models/normative/subcortical.json'] },
   vic_template: { descricao: 'VIC: template MNI152 2009c embutido e constante de calibração', arquivos: ['lib/icv.js'] },
+  normas_segmentarm: { descricao: 'Normas SegmentaRM: GAMLSS (SHASHo, sítio aleatório) em volumes do mesmo SynthSeg, bases abertas CC0', arquivos: ['models/normative/normas_segmentarm.json'] },
   recentragem: { descricao: 'Recentragem pelo método (nível A): desvio do z de controles do DLBS medidos com o mesmo SynthSeg', arquivos: ['models/normative/recentragem_synthseg.json'] },
   referencia_mesmo_metodo: { descricao: 'Assimetria e HOC por idade — SynthSeg 1.0 do SegmentaRM em controles do DLBS', arquivos: ['models/normative/referencia_mesmo_metodo.json'] },
   erro_medida: { descricao: 'Erro de medida teste-reteste por estrutura (intervalo de 90% do z)', arquivos: ['models/normative/erro_medida.json'] },

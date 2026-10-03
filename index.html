@@ -288,10 +288,11 @@
 
       <section class="panel" id="norm-panel" hidden>
         <h3>Normativo — idade e sexo</h3>
+        <label class="check" id="normas-proprias-wrap" hidden title="Normas ajustadas em volumes medidos com o MESMO SynthSeg do app (volume suave) em adultos saudáveis de bases abertas, com o sítio modelado: sem calibração local, a variância entre sítios entra no intervalo de 90% do z. Substituem BrainChart e CentileBrain nas medidas que cobrem."><input type="checkbox" id="opt-normas-proprias"> normas SegmentaRM (mesmo SynthSeg, sítio modelado)</label>
         <label class="check" id="recentragem-wrap" hidden title="Desconta do z o desvio que controles saudáveis medidos com o MESMO SynthSeg têm contra cada norma, por idade e sexo (nível A do plano metodológico); a escala do z continua a da norma e a incerteza entra no intervalo de 90%"><input type="checkbox" id="opt-recentragem"> recentragem pelo método (controles do mesmo SynthSeg)</label>
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">BrainChart (Bethlehem et al., Nature 2022) e CentileBrain (Ge et al., 2024) — normas de volumes
-        FreeSurfer. Aproximação para QC e pesquisa, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>
+        <p class="note">Normas SegmentaRM (próprias: mesmo SynthSeg, bases abertas CC0) ou BrainChart (Bethlehem et al., Nature 2022)
+        e CentileBrain (Ge et al., 2024), de volumes FreeSurfer. Pesquisa e QC, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>
         <p class="note" id="norm-sub-note" hidden></p>
       </section>
 
