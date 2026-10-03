@@ -252,8 +252,8 @@ z' = z − (a + c·t + d·t² + e·[M])     (t = idade − 60)
 *Validação* (`validacao/dlbs.md`, em controles saudáveis, onde o esperado é z ≈ 0):
 
 - no DLBS, em validação cruzada, o z médio de cada terço de idade fica a ±0,14 de 0 — no
-  terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
-- no conjunto externo, o |z| médio cai de 0,73 para 0,46.
+  terço mais velho (> 75 anos), o |z| médio cai de 0,83 para 0,04;
+- no conjunto externo, o |z| médio cai de 0,76 para 0,46.
 
 O que sobra no conjunto externo é, sobretudo, efeito de sítio e protocolo, que só a
 calibração local remove. O caso mais evidente é o pálido: a medida do SynthSeg nele depende
@@ -321,9 +321,11 @@ normativo fixo.
   - (iii) a incerteza da recentragem (bootstrap);
   - (iii) a incerteza da calibração (erro-padrão do deslocamento).
 
-  O item (i), a incerteza do próprio modelo normativo, não entra: nem o BrainChart nem o
-  CentileBrain publicam as covariâncias numa forma utilizável. O laudo diz isso, e o z em
-  cinza marca a borda etária, onde ela mais pesa.
+  O item (i), a incerteza do próprio modelo normativo, não entra. O BrainChart publica as
+  réplicas bootstrap (`BOOT_*.rds`) e o DP do efeito de estudo; esse efeito, omitido na curva
+  populacional, vale ≈ 1 z nos volumes globais — a maior fonte de incerteza para um sítio sem
+  calibração (ver `docs/auditoria-normativa.md`). O laudo diz isso, e o z em cinza marca a
+  borda etária.
 - *Percentis extremos*: "< 1", "< 0,1", "> 99", "> 99,9".
 
 *Tarefa "CDF exata GG/BCT, tolerância 1e-6"* — adaptado. As normas estão embarcadas como
@@ -386,8 +388,9 @@ próximo — a opção aceitável do plano.
 
 ## §8. Riscos e decisões do responsável
 
-- *Dados embarcados.* DLBS: CC0. BrainChart: modelos públicos. CentileBrain: sem licença
-  explícita, "for research purpose" — confirme com os autores antes de uso comercial.
+- *Dados embarcados.* DLBS: CC0. BrainChart: CC BY-NC-ND 4.0 ("strictly for non-commercial
+  use"). CentileBrain: sem licença explícita, "for research purpose" — confirme com os autores
+  antes de uso comercial.
   Nenhuma coorte com contrato de uso restrito entrou.
 - *Controles locais (nível C).* Exigem aprovação ética. O app guarda a calibração no
   navegador e a exporta sem identificadores.

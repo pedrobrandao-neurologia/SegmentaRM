@@ -408,10 +408,11 @@ crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covari�
 Informando **idade e sexo** (lidos do DICOM quando há: a idade é calculada pela **data do
 exame**, não pela do processamento), os volumes são comparados com duas famílias de normas:
 
-- **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos, cérebro total), com as
-  curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
-  [brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e
-  vendorizados em `models/normative/brainchart.json`);
+- **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos e cérebro total = GMV +
+  WMV, como no BrainChart), com as curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 —
+  modelos GAMLSS oficiais de [brainchart/Lifespan](https://github.com/brainchart/Lifespan),
+  licença CC BY-NC-ND 4.0, avaliados offline por `tools/gerar_brainchart_json.R` e vendorizados
+  em `models/normative/brainchart.json`);
 - **estruturas subcorticais por hemisfério e sexo** (tálamo, caudado, putâmen, pálido,
   hipocampo, amígdala, accumbens), com os modelos do **CentileBrain** (Ge et al., *Lancet
   Digit Health* 2024; ENIGMA Lifespan; ~37 mil controles, 3–90 anos, FreeSurfer aseg
@@ -449,8 +450,11 @@ ventrículos). Muitos desvios no mesmo sentido disparam o alerta de **desvios em
 - a incerteza da **recentragem pelo método**;
 - a incerteza da **calibração**.
 
-Não inclui a incerteza do próprio modelo normativo, que as normas não publicam de forma
-utilizável — na borda etária o intervalo real é maior.
+Não inclui a incerteza do próprio modelo normativo nem a **variação entre sítios**. O
+BrainChart publica as réplicas bootstrap e o DP do efeito de estudo, e esse efeito, omitido na
+curva populacional, vale ≈ 1 z nos volumes globais (≈ 0,6 no TCV, ≈ 0,5 nas regiões): para um
+sítio sem calibração local o intervalo real é bem maior que o mostrado. Detalhes em
+[`docs/auditoria-normativa.md`](docs/auditoria-normativa.md).
 
 **Recentragem pelo método (nível A).** As normas são de volumes FreeSurfer, e o SynthSeg
 difere dele por estrutura, e de forma grande: o córtex fica ~14–23% acima (mais nos idosos) e a
@@ -482,8 +486,8 @@ Validação completa em [`docs/validacao/dlbs.md`](docs/validacao/dlbs.md), em c
 saudáveis:
 
 - no DLBS, em validação cruzada, o z médio fica perto de 0 em todos os terços de idade — no
-  terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
-- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,46.
+  terço mais velho (> 75 anos), o |z| médio cai de 0,83 para 0,04;
+- num conjunto externo de outro scanner, o |z| médio cai de 0,76 para 0,46.
 
 O que sobra é efeito de sítio. Por isso, quando o equipamento difere do DLBS (Philips 3 T
 MPRAGE), o laudo recomenda a calibração local.

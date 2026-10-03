@@ -1,5 +1,5 @@
 {
- "gerado": "2026-09-27",
+ "gerado": "2026-10-03",
  "componentes": {
   "synthseg1": {
    "descricao": "SynthSeg 1.0 (pesos tfjs convertidos do synthseg_1.0.h5 oficial)",
@@ -109,21 +109,21 @@
   },
   "normas_brainchart": {
    "descricao": "BrainChart — quantis tabelados (Bethlehem et al., Nature 2022)",
-   "sha256": "cf06105de96cf52692af3103b7d50e47bf1c7e2e4228e563fee3c881534d249b",
+   "sha256": "290a2a099aaef818d4dff18e64cf2801b7b07a1e9ee6d2f49f803462bafc50e6",
    "arquivos": [
     {
      "arquivo": "models/normative/brainchart.json",
-     "sha256": "a873568d62218f39d57ba3d619b0cf5c56795f376913bff08f47358a6dc518df"
+     "sha256": "bbec8f5ef14f1d2d13c37c1923a231c6167bbb97ec5bc5dba250c25485d8011b"
     }
    ]
   },
   "normas_centilebrain": {
    "descricao": "CentileBrain — quantis subcorticais (Ge et al., 2024)",
-   "sha256": "8c171e0558f3ed315c36a844b75333371c9b3545cd406da51ce563e3fdd127c8",
+   "sha256": "34d871b01ab5522435fc831b604792d1fa55fb9244449f3faff16534b75b6c6f",
    "arquivos": [
     {
      "arquivo": "models/normative/subcortical.json",
-     "sha256": "aec0e54e957e7a80cf72faed101a30213d778fa80601c114ec45ba8e45e54037"
+     "sha256": "12f6439d02af69166e35af26067f4861987b07eda2da99d65ac8961b5fa4a299"
     }
    ]
   },
@@ -139,21 +139,21 @@
   },
   "recentragem": {
    "descricao": "Recentragem pelo método (nível A): desvio do z de controles do DLBS medidos com o mesmo SynthSeg",
-   "sha256": "5e8c0ef56ba5a49becd99c3949abf69db185469005f6bfbe601167370433fbce",
+   "sha256": "18e90c587aa2e771cde70ba0bbea0424df7125cf03e8069d3ccf25626c32d85a",
    "arquivos": [
     {
      "arquivo": "models/normative/recentragem_synthseg.json",
-     "sha256": "a952a484a22c749510551590ecb69dad4c37573b0cd5db2e23e6878c13192caf"
+     "sha256": "9b029fc3ce5e506fe99eb7de039f1b11a9f8c7929a8994af5539a4940e1a8230"
     }
    ]
   },
   "referencia_mesmo_metodo": {
    "descricao": "Assimetria e HOC por idade — SynthSeg 1.0 do SegmentaRM em controles do DLBS",
-   "sha256": "4d820ede91a3f85caf1713bb09d6bac05534cc970b46b35b3d253a10d45edb45",
+   "sha256": "27b69a843e2d5c5ad6c877be1640fb1acb539db429178c0c431d7a5d7f9b06a7",
    "arquivos": [
     {
      "arquivo": "models/normative/referencia_mesmo_metodo.json",
-     "sha256": "5d92073b4627db66243ac4e2e457f3e21a12d7fe43090a6ac7f8b81ce5130c2a"
+     "sha256": "68a15c52b8ac2110e091fee64903feefa17829c59794ddbc35ee461413f85df7"
     }
    ]
   },
@@ -169,11 +169,11 @@
   },
   "regras_qc": {
    "descricao": "Regras declarativas de QC",
-   "sha256": "58b21a76d301694bf69f34226c205002aba4df20a19e2aba3b67692b812de740",
+   "sha256": "6dd48b20876e0b5d950c45c3f8828154665081cb29daf47c2e8e9af4f73abd32",
    "arquivos": [
     {
      "arquivo": "models/qc_rules.json",
-     "sha256": "bdbe5728d31438843075935e081fcd94d790652275778f95190d4a66861efdc0"
+     "sha256": "263be593b301efc092bc22f9526a4a10f8b06f6bd01e3ca549936bfcd5b58482"
     }
    ]
   }
