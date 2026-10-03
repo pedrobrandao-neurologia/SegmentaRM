@@ -194,9 +194,10 @@ contraste não-T1, o caminho com rede é a caixa SynthSR acima.
 ## Parcelação cortical DKT (passo 04) — com o FastSurfer de verdade
 
 Passo separado sobre um resultado **SynthSeg** ou **aseg compacta** pronto — se falhar, a
-segmentação permanece intacta. A fusão replica o `--parc` do SynthSeg 2.0
+segmentação permanece intacta. A fusão replica o mecanismo do `--parc` do SynthSeg 2.0
 (`seg[máscara de córtex] = parcelação[máscara]`, com propagação modal por vizinhança —
-`lib/dkt-fusion.js`).
+`lib/dkt-fusion.js`), mas o atlas é outro: o `--parc` oficial é **DK** (Desikan-Killiany,
+68 regiões) e aqui é **DKT** (62 regiões).
 
 A **fonte recomendada** é a **FastSurferCNN**
 ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et
@@ -246,7 +247,7 @@ uso em pesquisa, cite o que é reprodução e o que é aproximação:
 | recon-all-clinical.sh | Aqui | Fidelidade |
 |---|---|---|
 | `mri_synthseg --robust` (cadeia S1→denoiser→S2) | SynthSeg 1.0 (rede original) | **análogo declarado** — ver *Por que o modo robusto não roda no navegador* abaixo |
-| `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesma saída (parcelas DKT), rede diferente; o conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
+| `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesmo mecanismo de fusão, mas **atlas diferente**: o `--parc` oficial dá o **Desikan-Killiany (DK, 68 regiões, com `bankssts`, `frontalpole` e `temporalpole`)**; aqui sai o **DKT** (62 regiões, Klein & Tourville 2012), de outra rede. O conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
 | `mri_synthseg --qc` (regressor CNN → `synthseg.qc.csv`) | **QC próprio por grupo tecidual** (confiança × coesão × simetria), nos mesmos 9 grupos e nomes do oficial | **método diferente, declarado** — ver *QC automático* abaixo |
 | `mri_synthsr` (visualização) | SynthSR v1.0 original (paridade r=0,997) | **exato** (em blocos) |
 | SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | **rede SynthDist original, com os pesos incluídos** (`models/synthsurf/`, 26,5 MB; paridade tfjs×Keras máx \|Δ\| = 7e-5) — opção padrão; SDF por EDT das máscaras segue como alternativa | **exato** (o fallback por EDT é aproximação declarada) |
