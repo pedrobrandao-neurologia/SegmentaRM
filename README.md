@@ -194,9 +194,10 @@ contraste não-T1, o caminho com rede é a caixa SynthSR acima.
 ## Parcelação cortical DKT (passo 04) — com o FastSurfer de verdade
 
 Passo separado sobre um resultado **SynthSeg** ou **aseg compacta** pronto — se falhar, a
-segmentação permanece intacta. A fusão replica o `--parc` do SynthSeg 2.0
+segmentação permanece intacta. A fusão replica o mecanismo do `--parc` do SynthSeg 2.0
 (`seg[máscara de córtex] = parcelação[máscara]`, com propagação modal por vizinhança —
-`lib/dkt-fusion.js`).
+`lib/dkt-fusion.js`), mas o atlas é outro: o `--parc` oficial é **DK** (Desikan-Killiany,
+68 regiões) e aqui é **DKT** (62 regiões).
 
 A **fonte recomendada** é a **FastSurferCNN**
 ([Deep-MI/FastSurfer](https://github.com/Deep-MI/FastSurfer), Apache 2.0; Henschel et
@@ -246,7 +247,7 @@ uso em pesquisa, cite o que é reprodução e o que é aproximação:
 | recon-all-clinical.sh | Aqui | Fidelidade |
 |---|---|---|
 | `mri_synthseg --robust` (cadeia S1→denoiser→S2) | SynthSeg 1.0 (rede original) | **análogo declarado** — ver *Por que o modo robusto não roda no navegador* abaixo |
-| `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesma saída (parcelas DKT), rede diferente; o conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
+| `mri_synthseg --parc` | parcelação DKT da FastSurferCNN | **análogo declarado** — mesmo mecanismo de fusão, mas **atlas diferente**: o `--parc` oficial dá o **Desikan-Killiany (DK, 68 regiões, com `bankssts`, `frontalpole` e `temporalpole`)**; aqui sai o **DKT** (62 regiões, Klein & Tourville 2012), de outra rede. O conversor já emite a `unet_parc` do SynthSeg 2.0 para quem quiser trocar |
 | `mri_synthseg --qc` (regressor CNN → `synthseg.qc.csv`) | **QC próprio por grupo tecidual** (confiança × coesão × simetria), nos mesmos 9 grupos e nomes do oficial | **método diferente, declarado** — ver *QC automático* abaixo |
 | `mri_synthsr` (visualização) | SynthSR v1.0 original (paridade r=0,997) | **exato** (em blocos) |
 | SynthDist (`mri_synth_surf.py`, SDFs ±5 mm) | **rede SynthDist original, com os pesos incluídos** (`models/synthsurf/`, 26,5 MB; paridade tfjs×Keras máx \|Δ\| = 7e-5) — opção padrão; SDF por EDT das máscaras segue como alternativa | **exato** (o fallback por EDT é aproximação declarada) |
@@ -407,10 +408,11 @@ crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covari�
 Informando **idade e sexo** (lidos do DICOM quando há: a idade é calculada pela **data do
 exame**, não pela do processamento), os volumes são comparados com duas famílias de normas:
 
-- **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos, cérebro total), com as
-  curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 — modelos GAMLSS oficiais de
-  [brainchart/Lifespan](https://github.com/brainchart/Lifespan), avaliados offline e
-  vendorizados em `models/normative/brainchart.json`);
+- **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos e cérebro total = GMV +
+  WMV, como no BrainChart), com as curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 —
+  modelos GAMLSS oficiais de [brainchart/Lifespan](https://github.com/brainchart/Lifespan),
+  licença CC BY-NC-ND 4.0, avaliados offline por `tools/gerar_brainchart_json.R` e vendorizados
+  em `models/normative/brainchart.json`);
 - **estruturas subcorticais por hemisfério e sexo** (tálamo, caudado, putâmen, pálido,
   hipocampo, amígdala, accumbens), com os modelos do **CentileBrain** (Ge et al., *Lancet
   Digit Health* 2024; ENIGMA Lifespan; ~37 mil controles, 3–90 anos, FreeSurfer aseg
@@ -448,8 +450,11 @@ ventrículos). Muitos desvios no mesmo sentido disparam o alerta de **desvios em
 - a incerteza da **recentragem pelo método**;
 - a incerteza da **calibração**.
 
-Não inclui a incerteza do próprio modelo normativo, que as normas não publicam de forma
-utilizável — na borda etária o intervalo real é maior.
+Não inclui a incerteza do próprio modelo normativo nem a **variação entre sítios**. O
+BrainChart publica as réplicas bootstrap e o DP do efeito de estudo, e esse efeito, omitido na
+curva populacional, vale ≈ 1 z nos volumes globais (≈ 0,6 no TCV, ≈ 0,5 nas regiões): para um
+sítio sem calibração local o intervalo real é bem maior que o mostrado. Detalhes em
+[`docs/auditoria-normativa.md`](docs/auditoria-normativa.md).
 
 **Recentragem pelo método (nível A).** As normas são de volumes FreeSurfer, e o SynthSeg
 difere dele por estrutura, e de forma grande: o córtex fica ~14–23% acima (mais nos idosos) e a
@@ -481,8 +486,8 @@ Validação completa em [`docs/validacao/dlbs.md`](docs/validacao/dlbs.md), em c
 saudáveis:
 
 - no DLBS, em validação cruzada, o z médio fica perto de 0 em todos os terços de idade — no
-  terço mais velho (> 75 anos), o |z| médio cai de 0,82 para 0,04;
-- num conjunto externo de outro scanner, o |z| médio cai de 0,73 para 0,46.
+  terço mais velho (> 75 anos), o |z| médio cai de 0,83 para 0,04;
+- num conjunto externo de outro scanner, o |z| médio cai de 0,76 para 0,46.
 
 O que sobra é efeito de sítio. Por isso, quando o equipamento difere do DLBS (Philips 3 T
 MPRAGE), o laudo recomenda a calibração local.

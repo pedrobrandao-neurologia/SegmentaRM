@@ -111,6 +111,18 @@
       "fonte": "tests/golden/motores.mjs --tamanho 96, 160 e 192 no exame de exemplo (tests/golden/README.md); o bloco sai do limite de textura da GPU em workers/synthseg.worker.js"
     },
     {
+      "id": "entrada_fora_do_dominio",
+      "tipo": "entrada_fora_do_dominio",
+      "severidade": "atencao",
+      "titulo": "Entrada da segmentação diferente da dos controles de referência",
+      "params": {},
+      "mensagem": "A rede recebeu uma entrada diferente da usada nos controles do DLBS: {difs}.",
+      "recomendacao": "A recentragem pelo método e as referências de assimetria e HOC foram medidas com a imagem nativa da cabeça inteira, sem pré-processamento e com espelhamento E/D (o caminho oficial do SynthSeg). Com outra entrada o volume muda de forma sistemática (a extração cerebral, por exemplo, tira o contexto do crânio que a rede usa), e o deslocamento descontado pode não ser o certo. Para laudo, refaça a segmentação com essas opções desligadas.",
+      "capturas": [],
+      "status": "validado",
+      "fonte": "domínio da recentragem (tools/lote_synthseg_node.mjs: entrada nativa, bloco 128³, espelhamento)"
+    },
+    {
       "id": "confianca_baixa",
       "tipo": "confianca_baixa",
       "severidade": "atencao",

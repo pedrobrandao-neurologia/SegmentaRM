@@ -33,9 +33,10 @@ GLOBAIS = {
     'SubCortGrayVol': ([f'{h}-{s}' for h in ('Left', 'Right') for s in ('Thalamus', 'Caudate', 'Putamen', 'Pallidum', 'Hippocampus', 'Amygdala', 'Accumbens-area', 'VentralDC')], ['SubCortGMVol']),
     'VentricleVol': (['Left-Lateral-Ventricle', 'Right-Lateral-Ventricle', 'Left-Inf-Lat-Vent', 'Right-Inf-Lat-Vent', '3rd-Ventricle', '4th-Ventricle'],
                      ['LhLatVentVol', 'RhLatVentVol', 'LhInfLatVentVol', 'RhInfLatVentVol', 'ThirdVentVol', 'FourthVentVol']),
-    'TCV': (['Left-Cerebral-Cortex', 'Right-Cerebral-Cortex', 'Left-Cerebral-White-Matter', 'Right-Cerebral-White-Matter'] +
-            [f'{h}-{s}' for h in ('Left', 'Right') for s in ('Thalamus', 'Caudate', 'Putamen', 'Pallidum', 'Hippocampus', 'Amygdala', 'Accumbens-area', 'VentralDC')],
-            ['CortexVol', 'CortWMVol', 'SubCortGMVol']),
+    # TCV do BrainChart = GMV + WMV (sem a cinzenta subcortical): a mediana tabelada acompanha
+    # GMV + WMV em todas as idades (−1% a +1,7%) e o N do modelo é o da WMV, não o da sGMV
+    'TCV': (['Left-Cerebral-Cortex', 'Right-Cerebral-Cortex', 'Left-Cerebral-White-Matter', 'Right-Cerebral-White-Matter'],
+            ['CortexVol', 'CortWMVol']),
 }
 SUB_FS = {'Thalamus': 'ThalamusProper', 'Caudate': 'Caudate', 'Putamen': 'Putamen', 'Pallidum': 'Pallidum',
           'Hippocampus': 'Hippocampus', 'Amygdala': 'Amygdala', 'Accumbens-area': 'Accumbens'}
@@ -257,7 +258,7 @@ def externo(args):
                 c = l.split(); tab[c[4]] = float(c[3])
         fs6 = {'CortexVol': m['CortexVol'], 'CerebralWhiteMatterVol': m['CerebralWhiteMatterVol'], 'SubCortGrayVol': m['SubCortGrayVol'],
                'VentricleVol': sum(tab[k] for k in ('Left-Lateral-Ventricle', 'Right-Lateral-Ventricle', 'Left-Inf-Lat-Vent', 'Right-Inf-Lat-Vent', '3rd-Ventricle', '4th-Ventricle')),
-               'TCV': m['CortexVol'] + m['CerebralWhiteMatterVol'] + m['SubCortGrayVol']}
+               'TCV': m['CortexVol'] + m['CerebralWhiteMatterVol']}
         for s_, f_ in (('Thalamus', 'Thalamus-Proper'), ('Caudate', 'Caudate'), ('Putamen', 'Putamen'), ('Pallidum', 'Pallidum'), ('Hippocampus', 'Hippocampus'), ('Amygdala', 'Amygdala'), ('Accumbens-area', 'Accumbens-area')):
             for h in ('Left', 'Right'):
                 fs6[f'{h}-{s_}'] = tab[f'{h}-{f_}']
@@ -268,7 +269,7 @@ def externo(args):
 
 
 NOMES = {'CortexVol': 'Córtex cerebral', 'CerebralWhiteMatterVol': 'Substância branca cerebral', 'SubCortGrayVol': 'Cinzenta subcortical',
-         'VentricleVol': 'Ventrículos', 'TCV': 'Cérebro total (GMV+WMV+sGMV)'}
+         'VentricleVol': 'Ventrículos', 'TCV': 'Cérebro total (GMV+WMV)'}
 PT = {'Thalamus': 'Tálamo', 'Caudate': 'Caudado', 'Putamen': 'Putâmen', 'Pallidum': 'Pálido', 'Hippocampus': 'Hipocampo', 'Amygdala': 'Amígdala',
       'Accumbens-area': 'Accumbens', 'VentralDC': 'Diencéfalo ventral', 'Lateral-Ventricle': 'Ventrículo lateral', 'Inf-Lat-Vent': 'Corno temporal',
       'Cerebral-Cortex': 'Córtex cerebral', 'Cerebral-White-Matter': 'SB cerebral', 'Cerebellum-Cortex': 'Córtex cerebelar', 'Cerebellum-White-Matter': 'SB cerebelar'}

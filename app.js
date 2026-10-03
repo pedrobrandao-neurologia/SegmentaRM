@@ -19,7 +19,7 @@ import { scanDicomSeries, directSeriesToNifti, correcaoDistorcao } from './lib/d
 import { protocoloDe } from './lib/protocolo.js'
 import { avaliarRegras, ocupacaoHipocampal, alvosDeCaptura } from './lib/qcrules.js'
 import { carregarAssimetria, anotarAssimetria, referenciaAssimetria, zHoc } from './lib/assimetria.js'
-import { calcularCalibracao, salvarCalibracao, calibracaoPara, calibracaoDesatualizada, lerCalibracoes, importarCalibracoes, N_MIN_DESLOCAMENTO, N_MIN_ESCALA } from './lib/calibracao.js'
+import { calcularCalibracao, salvarCalibracao, calibracaoPara, calibracaoDesatualizada, lerCalibracoes, importarCalibracoes, metodoDe, N_MIN_DESLOCAMENTO, N_MIN_ESCALA } from './lib/calibracao.js'
 import { computeSegQC, qcToCSV } from './lib/segqc.js'
 
 const VERSION = '1.1.0'
@@ -67,6 +67,7 @@ const state = {
   segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
   segVolSoft: null,    // Float64Array — volume soft por canal do SynthSeg (voxels; soma dos posteriors, como o --vol oficial)
   segBloco: null,      // { usado, pedido } — lado do bloco do SynthSeg (a recentragem foi medida com 128)
+  segDominio: null,    // { bet, synthsr, recorte, suavizacao, espelhamento } — entrada do SynthSeg × a das referências do DLBS
   qc: null,            // { grupos, estruturas, resumo } — QC por grupo tecidual
   bet: null,           // { mask, brain, f, voxels, normalized, cleanupLog } no espaço conformado
   surf: null,          // { meshes:[{name,kind,hemi,mz3}], stats:[...] } do passo de superfícies
@@ -861,6 +862,7 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.segVolSoft = null
   state.segVolSoftUnit = null
   state.segBloco = null
+  state.segDominio = null
   state.labelsMap = null
   state.colormap = null
   state.stats = null
@@ -1433,8 +1435,9 @@ async function runDktStep () {
       let lhP = 0, rhP = 0
       for (let v = 0; v < fused.seg.length; v++) {
         const s2 = fused.seg[v]
-        if (s2 >= fu.lhBase && s2 < fu.lhBase + 34) lhP++
-        else if (s2 >= fu.rhBase && s2 < fu.rhBase + 34) rhP++
+        // rótulos de parcela = base + (1–34): o próprio base é a última estrutura subcortical
+        if (s2 > fu.lhBase && s2 <= fu.lhBase + 34) lhP++
+        else if (s2 > fu.rhBase && s2 <= fu.rhBase + 34) rhP++
       }
       if (!lhP || !rhP) {
         log(`Atenção: a fusão não deixou parcelas DKT no hemisfério ${!lhP && !rhP ? 'esquerdo NEM no direito' : (!lhP ? 'esquerdo' : 'direito')} — o passo 05 sairá incompleto. Re-rode o DKT com outra fonte (FastSurfer 3 vistas / axial+coronal / brainchop) ou memória baixa na GPU (FastSurfer em CPU leva horas).`, 'err')
@@ -1934,6 +1937,12 @@ async function runSegmentation () {
       // conteúdo, e aí a rede recebe a imagem transformada (escolha do usuário).
       const nativeForSeg = (flags.doCrop || flags.doSmooth || state.synthsr) ? workVol : state.rawVol
       seg = await runSynthsegModel(conformed, isGPU, variant === 'low' ? 96 : 128, infImg ? 0.75 : 0.45, 0.93, infImg, nativeForSeg)
+      // como a entrada da rede difere da usada nos controles do DLBS (imagem nativa da cabeça
+      // inteira, sem pré-processamento, com espelhamento): vai para a regra de QC do domínio
+      state.segDominio = {
+        bet: !!infImg, synthsr: !!state.synthsr, recorte: !!flags.doCrop, suavizacao: !!flags.doSmooth,
+        espelhamento: !$('opt-synthseg-flip') || $('opt-synthseg-flip').checked
+      }
       labelsPath = './models/synthseg1/labels.json'
       colormapPath = './models/synthseg1/colormap.json'
     } else {
@@ -2129,13 +2138,18 @@ function atualizarAlertas () {
   if (!state.stats) { state.alertasQC = []; state.hoc = null; state.assimetria = null; renderAlertas(); return }
   const idade = parseFloat($('age').value)
   state.hoc = ocupacaoHipocampal(state.stats)
-  // HOC contra controles do mesmo método (quando há referência e idade)
+  const mesmoMetodo = !!(state.stats.volumeSoft && /SynthSeg/i.test(state.modelUsed || ''))
+  // HOC contra controles do mesmo método (quando há referência, idade e a mesma medida)
   for (const lado of Object.keys(state.hoc)) {
-    const zh = idade > 0 ? zHoc(state.hoc[lado].hoc, lado, idade) : null
+    const zh = mesmoMetodo && idade > 0 ? zHoc(state.hoc[lado].hoc, lado, idade) : null
     if (zh) Object.assign(state.hoc[lado], { z: zh.z, esperado: zh.media, dp: zh.dp })
   }
-  // z do índice de assimetria contra controles medidos com o MESMO método (quando há referência)
-  state.assimetria = anotarAssimetria(state.stats.pairs, idade > 0 ? idade : null)
+  // z do índice de assimetria contra controles medidos com o MESMO método (quando há referência):
+  // só quando a medida é a mesma (SynthSeg, volume suave) — uma MeshNet com volume rígido saía
+  // comparada à referência do SynthSeg e podia disparar alertas de assimetria/HOC
+  state.assimetria = mesmoMetodo
+    ? anotarAssimetria(state.stats.pairs, idade > 0 ? idade : null)
+    : anotarAssimetria(state.stats.pairs, null, null)
   state.alertasQC = state.regrasQC
     ? avaliarRegras(state.regrasQC, {
       idade: idade > 0 ? idade : null,
@@ -2147,7 +2161,7 @@ function atualizarAlertas () {
       hoc: state.hoc,
       assimetria: state.assimetria || [],
       aquisicao: aquisicaoMeta(),
-      segmentacao: { bloco: state.segBloco }
+      segmentacao: { bloco: state.segBloco, dominio: state.segDominio }
     })
     : []
   renderAlertas()
@@ -2634,16 +2648,24 @@ function atualizarRecentragem () {
 }
 
 // ---------- calibração do sítio (nível C) ----------
+// método de medida do exame atual (rede + convenção de volume): a calibração é por método
+function metodoAtual () {
+  return metodoDe(state.modelUsed, state.stats && state.stats.volumeSoft ? 'suave' : 'rigido')
+}
+
 function controlesDoProtocolo () {
   const fam = state.protocolo && state.protocolo.familia
   if (!fam) return []
-  return state.cohort.map(e => e.row).filter(r => +r.controle === 1 && r.protocolo_familia === fam)
+  // só controles do mesmo protocolo E medidos com o mesmo método: misturar SynthSeg suave com
+  // MeshNet rígido deslocava o z do sítio (ex.: córtex de 1,25 para 2,08 z)
+  const met = metodoAtual()
+  return state.cohort.map(e => e.row).filter(r => +r.controle === 1 && r.protocolo_familia === fam && metodoDe(r.model, r.metodo_volume) === met)
 }
 
 // escolhe a calibração deste protocolo (no mesmo modo — com ou sem recentragem) e atualiza o painel
 function atualizarCalibracao () {
   const fam = state.protocolo && state.protocolo.familia
-  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null)
+  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual())
   const el = $('calib-status')
   if (!el) return
   const n = controlesDoProtocolo().length
@@ -2651,10 +2673,10 @@ function atualizarCalibracao () {
   $('calib-exportar').disabled = !Object.keys(lerCalibracoes()).length
   if (!fam) { el.textContent = 'Sem exame carregado.'; return }
   const c = state.calibracao
-  el.textContent = `Protocolo deste exame: ${state.protocolo.familiaTxt} (família ${fam}). Controles deste protocolo na coorte: ${n}` +
+  el.textContent = `Protocolo deste exame: ${state.protocolo.familiaTxt} (família ${fam}). Controles deste protocolo e método na coorte: ${n}` +
     (n < N_MIN_DESLOCAMENTO ? ` (mínimo ${N_MIN_DESLOCAMENTO}).` : '.') +
     (c ? ` Calibração ativa: n = ${c.n} (${c.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}), criada em ${c.criada}.` + resumoControles(c)
-      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null) ? ' A calibração guardada foi feita com outra versão da recentragem pelo método — recalcule-a com os controles.'
+      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual()) ? ' A calibração guardada foi feita com outra versão da recentragem pelo método — recalcule-a com os controles.'
         : ' Sem calibração: os z deste exame saem com o selo "não calibrado para este sítio".') +
     (state.protocolo.semDicom ? ' Atenção: entrada sem cabeçalho DICOM — o protocolo não pôde ser identificado.' : '')
 }
@@ -2675,7 +2697,7 @@ function resumoControles (c) {
 function calcularCalibracaoSitio () {
   const linhas = controlesDoProtocolo()
   if (linhas.length < N_MIN_DESLOCAMENTO) { log(`Calibração: são necessários ≥ ${N_MIN_DESLOCAMENTO} controles deste protocolo na coorte (há ${linhas.length}).`, 'err'); return }
-  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null })
+  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null, metodo: metodoAtual() })
   salvarCalibracao(cal)
   log(`Calibração do sítio calculada com ${cal.n} controles (${cal.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}).` + (cal.avisos.length ? ' Avisos: ' + cal.avisos.join(' ') : ''), 'ok')
   atualizarCalibracao()

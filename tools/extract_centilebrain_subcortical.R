@@ -8,8 +8,8 @@
 #
 # O que sai:
 #  - curvas de centis do modelo LMS/GAMLSS (famílias Box-Cox BCCGo/BCPEo/BCTo, mu/sigma/nu/tau
-#    suavizados em pb(idade)) avaliadas numa grade de idades inteiras 3–90 anos em 13
-#    probabilidades (as mesmas de brainchart.json), + média e DP da distribuição (integração
+#    suavizados em pb(idade)) avaliadas numa grade de idades inteiras 3–90 anos em 23
+#    probabilidades (as mesmas de brainchart.json: P0,1–P99,9 e caudas até ±6 DP), + média e DP da distribuição (integração
 #    numérica nos quantis);
 #  - média prevista e RMSE do modelo MFPR só com idade (models_without_globalMeasures), que é a
 #    definição do escore de desvio publicada pelo CentileBrain: z = (y − ŷ)/RMSE.
@@ -34,7 +34,11 @@ REGIONS <- list(
   c("Accumbens-area", "L"), c("Accumbens-area", "R")
 )
 AGES <- 3:90
-PROBS <- c(0.001, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.999)
+# 13 centis usuais + caudas até ±6 DP: fora da tabela o app extrapola a reta probit do último
+# intervalo, que superestimava muito o |z| em famílias assimétricas/de cauda pesada (BCTo do
+# putâmen: z real +5 saía +7); com as caudas tabeladas o erro em |z| ≤ 6 fica < 0,1
+PROBS <- sort(c(pnorm(c(-6, -5, -4.5, -4, -3.5, 3.5, 4, 4.5, 5, 6)),
+                0.001, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 0.999))
 PFINE <- (seq_len(19999) - 0.5) / 19999  # para média/DP por integração nos quantis
 
 fixEnv <- function(L) lapply(L, function(a) {

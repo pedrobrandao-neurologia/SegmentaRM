@@ -1,0 +1,10 @@
+models/normative/brainchart.json — quantis avaliados dos modelos GAMLSS de
+Bethlehem RAI, Seidlitz J, White SR, et al. Brain charts for the human lifespan.
+Nature 2022;604:525–533. doi:10.1038/s41586-022-04554-y
+
+Modelos: github.com/brainchart/Lifespan (Share/OriginalModels). Licença do repositório:
+Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0);
+o FAQ do projeto restringe o uso a fins não comerciais.
+
+Gerador: tools/gerar_brainchart_json.R (efeitos fixos, sem efeito de estudo, idade
+pós-concepção). Cite o artigo original em trabalhos que usem estes números.
