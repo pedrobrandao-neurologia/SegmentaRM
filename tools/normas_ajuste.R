@@ -88,9 +88,11 @@ zDe <- function(m, dd, novos) {
   zSHASHo(log(novos$y), p$mu, p$sigma, p$nu, p$tau)
 }
 
-saida <- list(); loso <- list()
+# um fenótipo → list(saida, loso); semente própria (resultado independe da ordem em paralelo)
 umFenotipo <- function(f) {
   t0 <- Sys.time()
+  set.seed(20261003 + match(f, FEN))
+  loso <- list()
   d <- d0[is.finite(d0[[f]]) & d0[[f]] > 0, c("id", "sitio", "idade", "sexoM", "fabricante", f)]
   if (f == "vic") d <- d[d0$vicAviso[match(d$id, d0$id)] == 0, ]
   names(d)[6] <- "y"; d$ly <- log(d$y); d$sitio <- droplevels(d$sitio)
@@ -132,7 +134,7 @@ umFenotipo <- function(f) {
     }
   }
   nDec <- table(cut(dd$idade, c(18, seq(30, 90, 10), 200), right = FALSE))
-  saida[[f]] <<- list(
+  saida <- list(
     familia = a$familia, nu = if (a$familia == "SHASHo") round(pfin$nu[1], 6) else 0,
     tau = if (a$familia == "SHASHo") round(pfin$tau[1], 6) else 1,
     sigmaSitio = round(sb, 6), sigmaSitioGamlss = round(es$sigb, 6), F = grade$F, M = grade$M, epMuZ = epz,
@@ -149,14 +151,19 @@ umFenotipo <- function(f) {
     ms <- tryCatch(ajustar(tr, a$familia), error = function(e) NULL)
     if (is.null(ms)) next
     z <- tryCatch(zDe(ms, tr, te), error = function(e) { cat('  LOSO', s, conditionMessage(e), '\n'); rep(NA, nrow(te)) })
-    loso[[length(loso) + 1]] <<- data.frame(fenotipo = f, id = te$id, sitio = s, z = z)
+    loso[[length(loso) + 1]] <- data.frame(fenotipo = f, id = te$id, sitio = s, z = z)
   }
   cat(sprintf("%-26s %-6s n=%d sítios=%d excl=%d σ_sítio=%.3f (%.2f z) %.0fs\n", f, a$familia, nrow(d), nlevels(d$sitio),
               length(excl), sb, sb / pfin$sigma, as.numeric(Sys.time() - t0, units = "secs")))
+  list(saida = saida, loso = do.call(rbind, loso))
 }
-for (f in FEN) tryCatch(umFenotipo(f), error = function(e) cat(f, "FALHOU:", conditionMessage(e), "\n"))
-
-L <- do.call(rbind, loso)
+# fenótipos em paralelo (NUCLEOS no ambiente; padrão 4)
+res <- parallel::mclapply(FEN, function(f) tryCatch(umFenotipo(f), error = function(e) { cat(f, "FALHOU:", conditionMessage(e), "\n"); NULL }),
+                          mc.cores = as.integer(Sys.getenv("NUCLEOS", "4")), mc.preschedule = FALSE)
+names(res) <- FEN
+res <- res[!vapply(res, is.null, TRUE)]
+saida <- lapply(res, `[[`, "saida")
+L <- do.call(rbind, lapply(res, `[[`, "loso"))
 write.csv(L, file.path(VDIR, "loso_z.csv"), row.names = FALSE)
 
 bs <- unique(d0$base)
