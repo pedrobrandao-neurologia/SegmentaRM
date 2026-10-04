@@ -18,7 +18,7 @@
 # Validação (validacao_dir/loso_z.csv): para cada sítio com n ≥ 10, ajusta sem ele e calcula o z
 # dos seus exames pela curva populacional (sítio não visto). A adaptação com k controles do sítio e
 # a comparação com o pipeline atual ficam em tools/normas_relatorio.py.
-suppressMessages({ library(gamlss); library(jsonlite) })
+suppressMessages({ library(gamlss); library(jsonlite); library(nlme) })
 args <- commandArgs(TRUE)
 if (length(args) < 3) stop("uso: Rscript tools/normas_ajuste.R tabela.csv saida.json validacao_dir [B]")
 TAB <- args[1]; SAIDA <- args[2]; VDIR <- args[3]; B <- if (length(args) >= 4) as.integer(args[4]) else 40L
@@ -102,6 +102,10 @@ umFenotipo <- function(f) {
   if (length(excl)) { d <- d[!d$id %in% excl, ]; d$sitio <- droplevels(d$sitio); a <- ajusteFenotipo(d) }
   m <- a$m; dd <- d
   es <- getSmo(m, "mu", which = 2)
+  # σ_sítio exportado (vai para o IC do z): REML de um modelo misto com a mesma média (spline
+  # natural da idade + sexo) — o λ local do random() do gamlss encolhe para 0 com sítios pequenos
+  sb <- tryCatch(as.numeric(VarCorr(lme(ly ~ splines::ns(idade, 4) + sexoM, random = ~ 1 | sitio, data = d,
+                                         method = "REML"))[1, "StdDev"]), error = function(e) es$sigb)
   grade <- lapply(c(F = 0, M = 1), function(sx) {
     p <- popParams(m, dd, IDADES, rep(sx, length(IDADES)))
     list(mu = round(p$mu, 6), sigma = round(p$sigma, 6))
@@ -131,7 +135,7 @@ umFenotipo <- function(f) {
   saida[[f]] <<- list(
     familia = a$familia, nu = if (a$familia == "SHASHo") round(pfin$nu[1], 6) else 0,
     tau = if (a$familia == "SHASHo") round(pfin$tau[1], 6) else 1,
-    sigmaSitio = round(es$sigb, 6), F = grade$F, M = grade$M, epMuZ = epz,
+    sigmaSitio = round(sb, 6), sigmaSitioGamlss = round(es$sigb, 6), F = grade$F, M = grade$M, epMuZ = epz,
     n = nrow(dd), nSitios = nlevels(dd$sitio), excluidos = length(excl),
     nPorDecada = as.list(setNames(as.integer(nDec), names(nDec))),
     faixa = range(dd$idade), bic = round(a$bic, 1),
@@ -148,7 +152,7 @@ umFenotipo <- function(f) {
     loso[[length(loso) + 1]] <<- data.frame(fenotipo = f, id = te$id, sitio = s, z = z)
   }
   cat(sprintf("%-26s %-6s n=%d sítios=%d excl=%d σ_sítio=%.3f (%.2f z) %.0fs\n", f, a$familia, nrow(d), nlevels(d$sitio),
-              length(excl), es$sigb, es$sigb / pfin$sigma, as.numeric(Sys.time() - t0, units = "secs")))
+              length(excl), sb, sb / pfin$sigma, as.numeric(Sys.time() - t0, units = "secs")))
 }
 for (f in FEN) tryCatch(umFenotipo(f), error = function(e) cat(f, "FALHOU:", conditionMessage(e), "\n"))
 

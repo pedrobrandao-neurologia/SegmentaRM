@@ -86,7 +86,7 @@ def main():
     t = pd.read_csv(a.tabela)
     L = pd.read_csv(a.loso)
     N = json.load(open(a.normas))
-    zp = L.pivot_table(index='id', columns='fenotipo', values='z')
+    zp = L.pivot_table(index='id', columns='fenotipo', values='z').add_prefix('zp_')
     t = t.set_index('id')
     t['decada'] = (t.idade // 10 * 10).clip(upper=80).astype(int)
     linhas = []
@@ -145,7 +145,7 @@ def main():
         w('|---|---|---|---|')
         agg = {'p': [], 'r': [], 'b': []}
         for k in COMUNS:
-            cols = [(k, 'p'), (f'zr_{k}', 'r'), (f'zb_{k}', 'b')]
+            cols = [(f'zp_{k}', 'p'), (f'zr_{k}', 'r'), (f'zb_{k}', 'b')]
             cel = []
             for c, tag in cols:
                 m = metricas(d[c], d.sitio) if c in d else None
@@ -164,7 +164,7 @@ def main():
     w('| Medida | média · DP · \\|z\\|>1,96 · RMS sítio |')
     w('|---|---|')
     for k in EXTRAS:
-        m = metricas(df[k], df.sitio) if k in df else None
+        m = metricas(df[f'zp_{k}'], df.sitio) if f'zp_{k}' in df else None
         if m:
             w(f"| {nome(k)} | {f(m['media'], 2, True)} · {f(m['dp'])} · {pct(m['fora'])} · {f(m['rms_sitio'])} |")
     w('')
@@ -179,7 +179,7 @@ def main():
         for gv, g in df.groupby(grupo):
             cel = []
             for k in chaves:
-                p = g[k].dropna() if k in g else pd.Series(dtype=float)
+                p = g[f'zp_{k}'].dropna() if f'zp_{k}' in g else pd.Series(dtype=float)
                 r = g[f'zr_{k}'].dropna() if f'zr_{k}' in g else pd.Series(dtype=float)
                 cel.append(f"{f(p.mean(), 2, True)} ({f(p.std())}) / {f(r.mean(), 2, True)} ({f(r.std())})" if len(p) > 2 else '—')
             rot_g = f'{gv}+' if grupo == 'decada' and gv == 80 else (f'{gv}s' if grupo == 'decada' else gv)
@@ -198,7 +198,7 @@ def main():
     w('|---|---|---|')
     for k in (0, 5, 10, 20, 30):
         cel = []
-        for pref in ('', 'zr_'):
+        for pref in ('zp_', 'zr_'):
             ms = []
             for c in COMUNS:
                 col = pref + c
