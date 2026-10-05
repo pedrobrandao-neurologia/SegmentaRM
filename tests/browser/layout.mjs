@@ -46,12 +46,14 @@ export async function testeLayout () {
     const nm = await p.evaluate(() => ({
       lobos: window.__segrm.norms.lobes.length,
       mult: window.__segrm.norms.multiplicidade,
-      borda: window.__segrm.norms.proveniencia.centilebrain && window.__segrm.norms.proveniencia.centilebrain.borda,
+      borda: window.__segrm.norms.proveniencia.segmentarm && window.__segrm.norms.proveniencia.segmentarm.borda,
+      proprias: window.__segrm.norms.globals.some(g => g.familia === 'segmentarm') && window.__segrm.norms.subcorticais.some(g => g.familia === 'segmentarm' && g.chave === 'Left-Lateral-Ventricle') && !document.getElementById('normas-proprias-wrap').hidden,
+      icSitio: window.__segrm.norms.globals.some(g => g.incerteza && g.incerteza.sitio > 0),
+      diagNP: JSON.stringify({ g: window.__segrm.norms.globals.map(g => g.familia + ':' + g.chave), s: (window.__segrm.norms.subcorticais || []).map(g => g.chave), wrap: document.getElementById('normas-proprias-wrap').hidden, inc: window.__segrm.norms.globals.map(g => g.incerteza && g.incerteza.sitio) }),
       nota: document.getElementById('norm-sub-note').textContent,
       selo: [...document.querySelectorAll('#norm-table td[title]')].map(t => t.title).join(' | '),
       alertas: document.getElementById('alertas-panel').hidden === false,
       ic90: window.__segrm.norms.globals.some(g => Array.isArray(g.ic90)) && /IC 90%/.test(document.querySelector('#norm-table thead').textContent),
-      recentrado: window.__segrm.norms.globals.some(g => g.recentrado && isFinite(g.recentrado.desloc)) && !document.getElementById('recentragem-wrap').hidden,
       ic90diag: JSON.stringify({ n: window.__segrm.norms.globals.length, g0: window.__segrm.norms.globals[0] && Object.keys(window.__segrm.norms.globals[0]), th: document.querySelector('#norm-table thead').textContent }),
       calib: document.getElementById('calib-status').textContent
     }))
@@ -60,7 +62,17 @@ export async function testeLayout () {
     R.ok(nm.borda === true && /NÃO calibrado/.test(nm.selo), 'selo de proveniência com borda etária e sítio não calibrado' + (nm.borda === true && /NÃO calibrado/.test(nm.selo) ? '' : ` (borda ${nm.borda}; selo "${nm.selo.slice(0, 200)}")`))
     R.ok(nm.alertas, 'painel de alertas de QC visível')
     R.ok(nm.ic90, 'z com intervalo de 90% na tabela normativa' + (nm.ic90 ? '' : ` (${nm.ic90diag})`))
-    R.ok(nm.recentrado && /recentrado por controles do mesmo método/.test(nm.selo), 'z recentrado pelo método (nível A), com selo e opção visível')
+    R.ok(nm.proprias && /Normas SegmentaRM/.test(nm.selo) && nm.icSitio, 'normas SegmentaRM por padrão (SynthSeg suave), com ventrículo lateral por hemisfério e variância do sítio no IC' + (nm.proprias && /Normas SegmentaRM/.test(nm.selo) && nm.icSitio ? '' : ` (${nm.diagNP.slice(0, 600)})`))
+    // desligando as normas próprias: BrainChart/CentileBrain com a recentragem pelo método
+    await p.click('#opt-normas-proprias')
+    await p.waitForFunction(() => window.__segrm.norms && window.__segrm.norms.globals.some(g => g.familia === 'brainchart'), null, { timeout: 60000 })
+    const rc = await p.evaluate(() => ({
+      recentrado: window.__segrm.norms.globals.some(g => g.recentrado && isFinite(g.recentrado.desloc)) && !document.getElementById('recentragem-wrap').hidden,
+      selo: [...document.querySelectorAll('#norm-table td[title]')].map(t => t.title).join(' | ')
+    }))
+    R.ok(rc.recentrado && /recentrado por controles do mesmo método/.test(rc.selo), 'sem as normas próprias: z recentrado pelo método (nível A), com selo e opção visível')
+    await p.click('#opt-normas-proprias')
+    await p.waitForFunction(() => window.__segrm.norms && window.__segrm.norms.globals.some(g => g.familia === 'segmentarm'), null, { timeout: 60000 })
     R.ok(/Protocolo deste exame/.test(nm.calib), 'painel de calibração mostra o protocolo')
     // bloco do SynthSeg: registrado; aviso quando menor que o da recentragem (128³)
     const bl0 = await p.evaluate(() => ({ seg: window.__segrm.segBloco, alerta: (window.__segrm.alertasQC || []).some(a => a.id === 'bloco_reduzido') }))

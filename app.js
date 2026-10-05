@@ -66,6 +66,9 @@ const state = {
   synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
   segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
   segVolSoft: null,    // Float64Array — volume soft por canal do SynthSeg (voxels; soma dos posteriors, como o --vol oficial)
+  normasProprias: null,        // models/normative/normas_segmentarm.json (normas do mesmo método)
+  normasPropriasPreferidas: false,
+  normasPropriasAtivas: false,
   segBloco: null,      // { usado, pedido } — lado do bloco do SynthSeg (a recentragem foi medida com 128)
   segDominio: null,    // { bet, synthsr, recorte, suavizacao, espelhamento } — entrada do SynthSeg × a das referências do DLBS
   qc: null,            // { grupos, estruturas, resumo } — QC por grupo tecidual
@@ -2224,6 +2227,9 @@ function normOpts () {
     ferramentaPaciente: state.modelUsed || null,
     metodoVolume: state.stats && state.stats.volumeSoft ? 'suave' : 'rígido',
     recentragem: state.recentragemAtiva ? state.recentragem : null,
+    normasProprias: state.normasPropriasAtivas ? state.normasProprias : null,
+    // o VIC só entra na comparação com as normas próprias (é o mesmo eTIV afim dos controles)
+    vic: state.icv && state.icv.vic_mm3 > 0 && !state.icv.aviso ? state.icv.vic_mm3 : null,
     calibracao: state.calibracao || null
   }
 }
@@ -2241,8 +2247,9 @@ function renderNorms () {
   tbody.innerHTML = ''
   const sub = n.subcorticais || []
   const pv = n.proveniencia || {}
-  const rows = [{ sep: 'Globais — BrainChart', selo: seloNorma(pv.brainchart, pv) }, ...n.globals,
-    ...(sub.length ? [{ sep: 'Subcorticais — CentileBrain (por hemisfério)', selo: seloNorma(pv.centilebrain, pv) }] : []), ...sub]
+  const np = pv.segmentarm
+  const rows = [{ sep: np ? 'Globais — normas SegmentaRM (mesmo método)' : 'Globais — BrainChart', selo: seloNorma(np || pv.brainchart, pv) }, ...n.globals,
+    ...(sub.length ? [{ sep: np ? 'Subcorticais e ventrículos — normas SegmentaRM (por hemisfério)' : 'Subcorticais — CentileBrain (por hemisfério)', selo: seloNorma(np || pv.centilebrain, pv) }] : []), ...sub]
   for (const g of rows) {
     const tr = document.createElement('tr')
     if (g.sep) {
@@ -2256,7 +2263,8 @@ function renderNorms () {
     const cinza = g.extrapolacao ? 'color:var(--muted)' : ''
     const inc = g.incerteza
     tr.title = [g.extrapolacao ? (g.recentrado && g.recentrado.foraDaFaixa ? 'idade fora da faixa em que a recentragem foi ajustada — z instável' : 'idade na borda/fora da faixa da norma — z instável') : '', g.holm ? 'significativo após correção de Holm (α 5%)' : '', g.preEspecificada ? 'estrutura pré-especificada' : '', g.calibrado ? `calibrado (n = ${g.calibrado.n})` : '', g.recentrado ? `z recentrado pelo método (controles do mesmo método ficam em z ${fmtZs(g.recentrado.desloc)} nesta idade; z sem recentragem ${fmtZs(g.zBruto)})` : '',
-      inc ? `IC 90%: medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` + (inc.recentragem ? `, recentragem ±${(1.645 * inc.recentragem).toFixed(2)}` : '') + (inc.calibracao ? `, calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : '') : ''].filter(Boolean).join(' · ')
+      g.nDecada != null && g.extrapolacao ? `poucos controles das normas próprias nesta década de idade (${g.nDecada} exames de ${g.sitiosDecada != null ? g.sitiosDecada : '?'} sítio(s)) — z instável` : '',
+      inc ? 'IC 90%: ' + [inc.medida != null ? `medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` : '', inc.sitio ? `sítio não calibrado ±${(1.645 * inc.sitio).toFixed(2)}` : '', inc.curva ? `curva ±${(1.645 * inc.curva).toFixed(2)}` : '', inc.recentragem ? `recentragem ±${(1.645 * inc.recentragem).toFixed(2)}` : '', inc.calibracao ? `calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : ''].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · ')
     tr.innerHTML = `<td>${g.pt}${marca}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +
       `<td class="num" style="${cinza}">${formatPercentil(g.percentile)}</td>` +
@@ -2275,7 +2283,8 @@ function renderNorms () {
         partes.push(`Desvios em bloco (${Math.round(100 * (m.fracPositivos > 0.5 ? m.fracPositivos : 1 - m.fracPositivos))}% no mesmo sentido): padrão típico de viés de medida/norma ou de sítio não calibrado, não de biologia.`)
       }
     }
-    partes.push('As normas são de volumes FreeSurfer; o paciente é medido com outra ferramenta — sem a recentragem pelo método (controles do mesmo SynthSeg) ou a calibração do sítio, os z podem ter viés sistemático. z em cinza: idade na borda da norma. IC 90%: erro de medida (entre scanners enquanto o sítio não estiver calibrado) + recentragem + calibração; não inclui a incerteza do próprio modelo normativo.')
+    if (np) partes.push(`Normas SegmentaRM: controles saudáveis medidos com o mesmo SynthSeg do app, com o sítio modelado (validação em docs/validacao/normas.md). Sem calibração local, o IC 90% inclui a variância entre sítios e o erro da curva; com calibração, o deslocamento do sítio é estimado. z em cinza: década de idade com poucos controles. Parcelas corticais continuam no BrainChart.`)
+    else partes.push('As normas são de volumes FreeSurfer; o paciente é medido com outra ferramenta — sem a recentragem pelo método (controles do mesmo SynthSeg) ou a calibração do sítio, os z podem ter viés sistemático. z em cinza: idade na borda da norma. IC 90%: erro de medida (entre scanners enquanto o sítio não estiver calibrado) + recentragem + calibração; não inclui a incerteza do próprio modelo normativo.')
     note.hidden = false
     note.textContent = partes.join(' ')
   }
@@ -2327,7 +2336,13 @@ function reprodutibilidadeMeta () {
   if (/SynthSeg/i.test(modelo)) add('synthseg1')
   if (/FastSurfer/i.test(modelo)) add('fastsurfer')
   if (state.synthsr) add('synthsr')
-  if (state.norms && state.norms.available) { add('normas_brainchart'); if (state.norms.subcorticais) add('normas_centilebrain') }
+  if (state.norms && state.norms.available) {
+    const pv = state.norms.proveniencia || {}
+    if (pv.segmentarm) add('normas_segmentarm')
+    // com as normas próprias, o BrainChart fica só nas parcelas corticais
+    if (!pv.segmentarm || (state.norms.parcels && state.norms.parcels.length)) add('normas_brainchart')
+    if (pv.centilebrain) add('normas_centilebrain')
+  }
   if (state.icv) add('vic_template')
   if (state.norms && state.norms.available) {
     if (state.recentragemAtiva) add('recentragem')
@@ -2638,13 +2653,47 @@ async function carregarRecentragem () {
   } catch { /* sem recentragem: z crus contra as normas */ }
 }
 
-// a recentragem só se aplica quando a medida do paciente é a mesma dos controles de referência
+// a recentragem e as normas próprias só se aplicam quando a medida do paciente é a mesma dos
+// controles de referência (SynthSeg 1.0 com volume suave); com as normas próprias ativas, a
+// recentragem (que traduz o SynthSeg para normas FreeSurfer) fica sem efeito
 function atualizarRecentragem () {
   const t = state.recentragem
-  const origemOk = !!(t && state.stats && state.stats.volumeSoft && /SynthSeg/i.test(state.modelUsed || ''))
-  state.recentragemAtiva = !!(t && state.recentragemPreferida && origemOk)
+  const origemOk = !!(state.stats && state.stats.volumeSoft && /SynthSeg/i.test(state.modelUsed || ''))
+  const np = state.normasProprias
+  state.normasPropriasAtivas = !!(np && state.normasPropriasPreferidas && origemOk)
+  state.recentragemAtiva = !!(t && state.recentragemPreferida && origemOk && !state.normasPropriasAtivas)
   const wrap = $('recentragem-wrap')
-  if (wrap && t) wrap.title = `${t.fonte || ''} — n = ${t.n || '?'}; idades ${(t.idadeFaixa || []).join('–')}. ${t.metodo || ''}` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)')
+  if (wrap && t) {
+    wrap.title = `${t.fonte || ''} — n = ${t.n || '?'}; idades ${(t.idadeFaixa || []).join('–')}. ${t.metodo || ''}` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)') + (state.normasPropriasAtivas ? ' · sem efeito com as normas SegmentaRM' : '')
+    const cb = $('opt-recentragem'); if (cb) cb.disabled = state.normasPropriasAtivas
+  }
+  const wnp = $('normas-proprias-wrap')
+  if (wnp && np) wnp.title = `${np.fonte || ''} — n = ${np.n || '?'}, ${np.nSitios || '?'} sítios; idades ${(np.faixa || []).join('–')}.` + (origemOk ? '' : ' · indisponível para esta segmentação (só SynthSeg com volume suave)')
+}
+
+// normas próprias (models/normative/normas_segmentarm.json): mesmo método, sítio modelado
+async function carregarNormasProprias () {
+  try {
+    const r = await fetch('./models/normative/normas_segmentarm.json')
+    if (!r.ok) return
+    state.normasProprias = await r.json()
+    let pref = null
+    try { pref = localStorage.getItem('segmentarm_normas_proprias') } catch { /* modo privado */ }
+    state.normasPropriasPreferidas = pref == null ? !!state.normasProprias.ativoPorPadrao : pref === '1'
+    const cb = $('opt-normas-proprias')
+    if (cb) {
+      $('normas-proprias-wrap').hidden = false
+      cb.checked = state.normasPropriasPreferidas
+      cb.onchange = () => {
+        state.normasPropriasPreferidas = cb.checked
+        try { localStorage.setItem('segmentarm_normas_proprias', cb.checked ? '1' : '0') } catch { /* modo privado */ }
+        atualizarRecentragem()
+        atualizarCalibracao()
+        updateNorms()
+      }
+    }
+    atualizarRecentragem()
+  } catch { /* sem normas próprias: BrainChart e CentileBrain */ }
 }
 
 // ---------- calibração do sítio (nível C) ----------
@@ -2665,7 +2714,7 @@ function controlesDoProtocolo () {
 // escolhe a calibração deste protocolo (no mesmo modo — com ou sem recentragem) e atualiza o painel
 function atualizarCalibracao () {
   const fam = state.protocolo && state.protocolo.familia
-  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual())
+  state.calibracao = calibracaoPara(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual(), state.normasPropriasAtivas ? state.normasProprias : null)
   const el = $('calib-status')
   if (!el) return
   const n = controlesDoProtocolo().length
@@ -2676,7 +2725,7 @@ function atualizarCalibracao () {
   el.textContent = `Protocolo deste exame: ${state.protocolo.familiaTxt} (família ${fam}). Controles deste protocolo e método na coorte: ${n}` +
     (n < N_MIN_DESLOCAMENTO ? ` (mínimo ${N_MIN_DESLOCAMENTO}).` : '.') +
     (c ? ` Calibração ativa: n = ${c.n} (${c.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}), criada em ${c.criada}.` + resumoControles(c)
-      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual()) ? ' A calibração guardada foi feita com outra versão da recentragem pelo método — recalcule-a com os controles.'
+      : calibracaoDesatualizada(fam, state.recentragemAtiva ? state.recentragem : null, metodoAtual(), state.normasPropriasAtivas ? state.normasProprias : null) ? ` A calibração guardada foi feita com outra versão ${state.normasPropriasAtivas ? 'das normas SegmentaRM' : 'da recentragem pelo método'} — recalcule-a com os controles.`
         : ' Sem calibração: os z deste exame saem com o selo "não calibrado para este sítio".') +
     (state.protocolo.semDicom ? ' Atenção: entrada sem cabeçalho DICOM — o protocolo não pôde ser identificado.' : '')
 }
@@ -2697,7 +2746,7 @@ function resumoControles (c) {
 function calcularCalibracaoSitio () {
   const linhas = controlesDoProtocolo()
   if (linhas.length < N_MIN_DESLOCAMENTO) { log(`Calibração: são necessários ≥ ${N_MIN_DESLOCAMENTO} controles deste protocolo na coorte (há ${linhas.length}).`, 'err'); return }
-  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null, metodo: metodoAtual() })
+  const cal = calcularCalibracao(linhas, { protocolo: state.protocolo, recentragem: state.recentragemAtiva ? state.recentragem : null, metodo: metodoAtual(), normasProprias: state.normasPropriasAtivas ? state.normasProprias : null })
   salvarCalibracao(cal)
   log(`Calibração do sítio calculada com ${cal.n} controles (${cal.n >= N_MIN_ESCALA ? 'deslocamento + escala' : 'só deslocamento'}).` + (cal.avisos.length ? ' Avisos: ' + cal.avisos.join(' ') : ''), 'ok')
   atualizarCalibracao()
@@ -3022,6 +3071,7 @@ async function main () {
   fetch('./models/qc_rules.json').then(r => r.ok ? r.json() : null).then(m => { state.regrasQC = m }).catch(() => {})
   carregarAssimetria().then(() => { if (state.stats) atualizarAlertas() })
   carregarRecentragem()
+  carregarNormasProprias()
   log('SegmentaRM ' + VERSION + ' pronto. Nenhuma imagem sai do dispositivo.')
 }
 

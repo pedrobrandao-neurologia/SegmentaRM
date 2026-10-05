@@ -1,7 +1,7 @@
 // Cache offline: pré-carrega o casco do aplicativo; modelos, fontes e vendors
 // entram no cache na primeira utilização (cache-first).
 
-const CACHE = 'segmentarm-v29'
+const CACHE = 'segmentarm-v30'
 const SHELL = [
   './',
   './index.html',
@@ -23,6 +23,7 @@ const SHELL = [
   './models/normative/brainchart.json',
   './models/normative/subcortical.json',
   './models/normative/erro_medida.json', './models/normative/recentragem_synthseg.json',
+  './models/normative/normas_segmentarm.json',
   './models/normative/referencia_mesmo_metodo.json',
   './brainchop/brainchop-webworker.js', './brainchop/brainchop-parameters.js',
   './brainchop/tensor-utils.js', './brainchop/bwlabels.js',

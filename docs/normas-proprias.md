@@ -1,4 +1,9 @@
-# Normas próprias a partir de bases públicas — plano
+# Normas próprias a partir de bases públicas
+
+> **Estado (out/2026):** o nível A está implementado e embarcado no app
+> (`models/normative/normas_segmentarm.json`, ligado por padrão para o SynthSeg com volume
+> suave). Resultado e validação na [§6](#6-implementação-e-validação-out2026) e em
+> [`validacao/normas.md`](validacao/normas.md). As seções 1–5 são o plano original.
 
 **Objetivo.** Substituir o par "norma FreeSurfer + recentragem" por curvas ajustadas
 diretamente em volumes medidos com o **mesmo método** do app: SynthSeg 1.0 do SegmentaRM,
@@ -149,3 +154,72 @@ Pálido e accumbens recebem marca de baixa confiabilidade (dependem do contraste
 **Domínio.** Faltam 1,5 T e GE no nível A; as normas valem só para o mesmo peso, o mesmo bloco e o volume suave.
 
 **"Saudável" varia entre bases.** Há Alzheimer pré-clínico nos idosos, e o PAN tem 69% de mulheres.
+
+## 6. Implementação e validação (out/2026)
+
+### O que foi feito
+
+| Etapa | Ferramenta | Resultado |
+|---|---|---|
+| Seleção | `tools/normas_selecao.py` | 641 exames de 14 sítios, todos 3 T: 201 do DLBS (os da recentragem) + 440 novos, com cotas por sítio, estratificação por faixa de 5 anos e sexo, e ordem intercalada |
+| Medida | `tools/normas_lote.mjs` | SynthSeg do app em Node (bloco 128³, volume suave) e VIC do app (conformação do NiiVue + `lib/icv.js`); cada T1 é baixado do S3, medido e **apagado** |
+| Tabela | `tools/normas_preparar.mjs` | fenótipos com as mesmas definições do app e, nos mesmos exames, o z do pipeline atual (com e sem recentragem) |
+| Ajuste | `tools/normas_ajuste.R` | GAMLSS por fenótipo (SHASHo ou normal sobre ln V, pelo BIC); μ = P-spline da idade + sexo + sítio aleatório; σ = P-spline da idade + sexo; σ_sítio por REML; erro da curva por bootstrap de sítios (B = 40); validação deixando cada sítio de fora |
+| Relatório | `tools/normas_relatorio.py` | [`validacao/normas.md`](validacao/normas.md) |
+| Locais (nível B) | `tools/normas_local.py` | manifesto de exames do disco do usuário (OASIS-3 ou controles do serviço) |
+
+Amostra (F/M): 10s 15/11 · 20s 58/44 · 30s 26/24 · 40s 23/20 · 50s 64/49 · 60s 64/60 ·
+70s 62/60 · 80+ 34/27. Fabricantes: Philips 301, Siemens 280, GE 60.
+
+Processamento: ~170 s por exame num contêiner de 4 núcleos (dois processos em paralelo),
+~14 h no total; o ajuste com bootstrap leva ~1 h.
+
+### Validação: sítio não visto
+
+Comparação nos mesmos exames, com cada sítio deixado de fora do ajuste das normas próprias. A
+recentragem atual foi ajustada no DLBS, então a comparação justa é **sem o DLBS** (440 exames,
+13 sítios). Média sobre as 19 medidas comuns (globais e subcorticais E/D):
+
+| | Normas próprias | Atual (BrainChart/CentileBrain + recentragem) | Sem recentragem |
+|---|---|---|---|
+| \|média do z\| | **0,07** | 0,43 | 0,62 |
+| Viés típico de um sítio (RMS das médias) | **0,32** | 0,56 | 0,73 |
+| DP do z | 1,03 | 0,96 | 0,96 |
+| \|z\| > 1,96 (nominal 5%) | **5,8%** | 8,2% | 10,9% |
+
+- **Globais** (córtex, SB, TCV, ventrículos): empate. O viés por sítio é de 0,19–0,34 nas
+  próprias e de 0,25–0,26 no pipeline atual; na cinzenta subcortical, 0,27 contra 0,49.
+- **Subcorticais:** vantagem clara das próprias. O CentileBrain recentrado ainda fica +0,3 a
+  +0,7 nos núcleos da base e na amígdala, e +1,1 a +1,6 no pálido (fica em +0,1 a +0,2 nas
+  próprias).
+- **Com controles locais** (k = 10–30, a calibração do app): as duas convergem, com viés por
+  sítio de 0,3–0,4 e |z| > 1,96 de 4,4–6,6%.
+- **Variação entre sítios estimada** (em z): 0,2–0,3 nas medidas globais, no hipocampo, no
+  tálamo e no cerebelo; 0,3–0,4 na amígdala e no accumbens; 0,65–1,0 no pálido. O efeito de estudo do
+  BrainChart é de ≈ 1 z nas medidas globais, porque o pipeline (FreeSurfer × outros) entra
+  nele; aqui o método é fixo.
+
+**Decisão:** as normas próprias ficam **ligadas por padrão** (`ativoPorPadrao`) quando a
+segmentação é SynthSeg com volume suave. Elas eliminam o viés sistemático das subcorticais e
+levam o IC 90% com a variância do sítio, coisa que o pipeline atual não faz. BrainChart e
+CentileBrain continuam como alternativa no painel; as parcelas corticais seguem no BrainChart.
+
+### Limitações que continuam
+
+1. **80+ anos:** 61 exames, quase todos do DLBS. Deixando o DLBS de fora, o hipocampo aos 80+
+   sai em −0,6 (E) e −0,9 (D): a curva desses anos é, na prática, a do DLBS. O app marca o z em
+   cinza quando a década tem < 30 controles **ou** < 3 sítios, e o erro da curva aos 85 anos
+   (0,2–0,3 z; 1,1 no corno temporal E) entra no IC. **O OASIS-3 (nível B) é o próximo passo:**
+   `tools/normas_local.py --oasis3` já monta o manifesto a partir dos arquivos que o usuário
+   baixar depois de aceitar os termos.
+2. **Só 3 T e só EUA/Europa** (Philips, Siemens, GE). Nada de 1,5 T nem de brasileiros: a
+   calibração local continua recomendada.
+3. **Pálido:** depende do contraste. A variação entre sítios estimada é de 0,65–1,0 z, e o IC
+   fica largo de acordo.
+4. **VIC:** a norma usa só os 573 exames sem aviso no registro. No sítio 1 do ds003592 (imagens
+   com 43% dos voxels zerados, provavelmente desidentificação agressiva), o registro falhou em
+   34 de 35 exames. O app avisa nesses casos, e o VIC deles não entra na comparação.
+5. **σ_sítio = 0 nos ventrículos** (REML na borda): a variação biológica (DP de ~0,35 em ln V)
+   domina a de sítio. O IC desses itens fica só com o erro de medida e o da curva.
+6. **"Saudável" difere entre bases** (por exemplo, Alzheimer pré-clínico nos idosos; o PAN
+   exclui só demência e doença psicótica).
