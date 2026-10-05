@@ -2263,7 +2263,7 @@ function renderNorms () {
     const cinza = g.extrapolacao ? 'color:var(--muted)' : ''
     const inc = g.incerteza
     tr.title = [g.extrapolacao ? (g.recentrado && g.recentrado.foraDaFaixa ? 'idade fora da faixa em que a recentragem foi ajustada — z instável' : 'idade na borda/fora da faixa da norma — z instável') : '', g.holm ? 'significativo após correção de Holm (α 5%)' : '', g.preEspecificada ? 'estrutura pré-especificada' : '', g.calibrado ? `calibrado (n = ${g.calibrado.n})` : '', g.recentrado ? `z recentrado pelo método (controles do mesmo método ficam em z ${fmtZs(g.recentrado.desloc)} nesta idade; z sem recentragem ${fmtZs(g.zBruto)})` : '',
-      g.nDecada != null && g.extrapolacao ? `só ${g.nDecada} controles das normas próprias nesta década de idade` : '',
+      g.nDecada != null && g.extrapolacao ? `poucos controles das normas próprias nesta década de idade (${g.nDecada} exames de ${g.sitiosDecada != null ? g.sitiosDecada : '?'} sítio(s)) — z instável` : '',
       inc ? 'IC 90%: ' + [inc.medida != null ? `medida ±${(1.645 * inc.medida).toFixed(2)} (${inc.entreScanners ? 'entre scanners' : 'mesmo scanner'}; ${inc.fonteMedida}${inc.aproximado ? ', aproximado' : ''})` : '', inc.sitio ? `sítio não calibrado ±${(1.645 * inc.sitio).toFixed(2)}` : '', inc.curva ? `curva ±${(1.645 * inc.curva).toFixed(2)}` : '', inc.recentragem ? `recentragem ±${(1.645 * inc.recentragem).toFixed(2)}` : '', inc.calibracao ? `calibração ±${(1.645 * inc.calibracao).toFixed(2)}` : ''].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · ')
     tr.innerHTML = `<td>${g.pt}${marca}</td>` +
       `<td class="num">${(g.value / 1000).toFixed(1)}</td>` +

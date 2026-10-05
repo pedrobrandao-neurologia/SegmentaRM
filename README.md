@@ -406,7 +406,30 @@ crânio). Erro individual típico de 3–4%: para grupos, prefira-o como covari�
 ## Comparação normativa (QC, não clínico)
 
 Informando **idade e sexo** (lidos do DICOM quando há: a idade é calculada pela **data do
-exame**, não pela do processamento), os volumes são comparados com duas famílias de normas:
+exame**, não pela do processamento), os volumes são comparados com normas por idade e sexo.
+
+**Normas SegmentaRM (padrão com o SynthSeg, volume suave).** São curvas próprias, ajustadas em
+volumes medidos com o **mesmo SynthSeg do app**. A amostra é de 641 adultos saudáveis de bases
+abertas CC0 do OpenNeuro (14 sítios Philips, Siemens e GE, todos 3 T; 18–89 anos), com o
+**sítio modelado**. Detalhes em [`docs/normas-proprias.md`](docs/normas-proprias.md) e
+[`docs/validacao/normas.md`](docs/validacao/normas.md).
+
+- Modelo: GAMLSS por estrutura, SHASHo (ou normal) sobre o log do volume, com P-spline da idade,
+  sexo e sítio como efeito aleatório. O z sai em forma fechada:
+  `z = sinh(τ·asinh((ln V − μ)/σ) − ν)`.
+- Cobre os volumes globais, as subcorticais E/D, cornos temporais, ventrículos laterais,
+  cerebelo, tronco e o **VIC (eTIV)**. As parcelas corticais continuam no BrainChart.
+- Sem calibração local, o IC 90% inclui a **variância entre sítios** e o erro da curva; com
+  calibração, o deslocamento do sítio é estimado.
+- Década com < 30 controles ou < 3 sítios (hoje, os 80+): z em cinza.
+- Validação deixando cada sítio de fora, sem o DLBS: |média do z| 0,07 contra 0,43 do pipeline
+  anterior (BrainChart/CentileBrain + recentragem), e |z| > 1,96 em 5,8% contra 8,2%. A
+  vantagem está nas subcorticais; nas medidas globais, as duas empatam.
+- Faltam 1,5 T, brasileiros e uma boa amostra de 80+. O OASIS-3 entra com os termos aceitos
+  pelo usuário (`tools/normas_local.py`). A calibração local continua recomendada.
+
+Uma caixa no painel normativo volta às normas de literatura, que também valem para as outras
+redes e para o volume rígido:
 
 - **volumes globais** (córtex, SB, cinzenta subcortical, ventrículos e cérebro total = GMV +
   WMV, como no BrainChart), com as curvas dos **brain charts** (Bethlehem et al., *Nature* 2022 —
@@ -441,7 +464,8 @@ levam *; as estruturas pré-especificadas levam • (hipocampo, amígdala, tála
 ventrículos). Muitos desvios no mesmo sentido disparam o alerta de **desvios em bloco**:
 é o padrão de viés entre ferramentas ou de sítio não calibrado, não de biologia.
 
-**Intervalo de 90% do z.** Cada z vem com um IC 90% que soma, em quadratura, três fontes:
+**Intervalo de 90% do z (normas de literatura).** Cada z vem com um IC 90% que soma, em
+quadratura, três fontes:
 
 - o **erro de medida** publicado para o SynthSeg (`models/normative/erro_medida.json`):
   - van Nederpelt et al., *Neuroradiology* 2023 — EPM intra e entre scanners do SynthSeg 1.0 e ICC por estrutura;
@@ -659,6 +683,7 @@ models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts d
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/normative/subcortical.json      centis subcorticais (CentileBrain)
+models/normative/normas_segmentarm.json       normas próprias (mesmo SynthSeg, 641 controles, 14 sítios)
 models/normative/recentragem_synthseg.json    recentragem do z pelo método (controles do DLBS)
 models/normative/referencia_mesmo_metodo.json assimetria e HOC por idade (DLBS, SynthSeg do app)
 models/normative/erro_medida.json      teste-reteste por estrutura (IC 90% do z)
@@ -673,6 +698,12 @@ tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, s
 tools/synthseg_node.mjs · tools/lote_synthseg_node.mjs  o SynthSeg do app em Node (lote offline)
 tools/dlbs_selecao.py · tools/referencias_dlbs.py      seleção do DLBS, referências do mesmo método, comparação com o FreeSurfer
 tools/recentragem_dlbs.mjs             recentragem do z (nível A) com as normas do app + relatório
+tools/normas_selecao.py                normas próprias: manifesto das bases CC0 (OpenNeuro, S3)
+tools/normas_lote.mjs                  normas próprias: baixa → SynthSeg + VIC → apaga a imagem
+tools/normas_local.py                  normas próprias: exames locais (OASIS-3, controles do serviço)
+tools/normas_preparar.mjs              normas próprias: tabela + z do pipeline anterior
+tools/normas_ajuste.R                  normas próprias: GAMLSS com sítio aleatório + validação
+tools/normas_relatorio.py              normas próprias: docs/validacao/normas.md
 tools/manifesto_sha256.mjs             regenera models/manifest-sha256.json
 tests/unit/ · tests/browser/ · tests/golden/  testes (Node, Chromium) e exames de referência
 docs/                                  plano metodológico e validação

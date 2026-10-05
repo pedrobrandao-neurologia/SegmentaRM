@@ -45,6 +45,10 @@ test('z SHASHo em forma fechada, mediana e inverso exatos', () => {
   // poucos controles na década (80s: 20 < 30) → borda
   assert.equal(N.avaliarProprio(NP, 'CortexVol', 'F', 84, v).borda, true)
   assert.equal(N.avaliarProprio(NP, 'CortexVol', 'F', 64, v).borda, false)
+  // década com controles suficientes mas de menos de 3 sítios → borda também
+  const NPs = { ...NP, fenotipos: { CortexVol: { ...NP.fenotipos.CortexVol, sitiosPorDecada: { '[60,70)': 2, '[50,60)': 5 } } } }
+  assert.equal(N.avaliarProprio(NPs, 'CortexVol', 'F', 64, v).borda, true)
+  assert.equal(N.avaliarProprio(NPs, 'CortexVol', 'F', 55, v).borda, false)
   assert.equal(N.avaliarProprio(NP, 'Nada', 'F', 64, v), null)
 })
 

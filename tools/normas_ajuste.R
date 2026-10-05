@@ -133,13 +133,18 @@ umFenotipo <- function(f) {
       epz <- list(F = round(sdmu[seq_along(IDADES)] / grade$F$sigma, 4), M = round(sdmu[-seq_along(IDADES)] / grade$M$sigma, 4), B = length(bm))
     }
   }
-  nDec <- table(cut(dd$idade, c(18, seq(30, 90, 10), 200), right = FALSE))
+  dec <- cut(dd$idade, c(18, seq(30, 90, 10), 200), right = FALSE)
+  nDec <- table(dec)
+  # sítios com ≥ 3 exames em cada década: uma década coberta por 1–2 sítios dá uma curva que é,
+  # na prática, a desses sítios (o app marca o z como instável)
+  sDec <- sapply(levels(dec), function(l) sum(table(droplevels(dd$sitio[dec == l & !is.na(dec)])) >= 3))
   saida <- list(
     familia = a$familia, nu = if (a$familia == "SHASHo") round(pfin$nu[1], 6) else 0,
     tau = if (a$familia == "SHASHo") round(pfin$tau[1], 6) else 1,
     sigmaSitio = round(sb, 6), sigmaSitioGamlss = round(es$sigb, 6), F = grade$F, M = grade$M, epMuZ = epz,
     n = nrow(dd), nSitios = nlevels(dd$sitio), excluidos = length(excl),
     nPorDecada = as.list(setNames(as.integer(nDec), names(nDec))),
+    sitiosPorDecada = as.list(setNames(as.integer(sDec), levels(dec))),
     faixa = range(dd$idade), bic = round(a$bic, 1),
     blup = as.list(setNames(round(as.numeric(es$coef), 4), levels(dd$sitio))))
 

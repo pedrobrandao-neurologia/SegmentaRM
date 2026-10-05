@@ -79,3 +79,10 @@ A função qnorm/pnorm (erro < 2e-7) e o procedimento de Holm (sem discordância
 7. **Definição de "Ventricles" no BrainChart:** não pôde ser conferida. O suplemento estava inacessível; se a norma não incluir o 3º e o 4º ventrículos, o desvio é de ≈ 0,2–0,3 z.
 
 O caminho para atacar os itens 1–4 de uma vez é ter normas próprias, medidas com o mesmo método e com o sítio modelado: ver [`normas-proprias.md`](normas-proprias.md).
+
+**Atualização (out/2026):** as normas próprias foram implementadas e são o padrão para o SynthSeg com volume suave. Com elas:
+- o item 1 passa a ter a variância entre sítios estimada dentro do IC 90%;
+- o item 2 deixa de se aplicar (não há recentragem);
+- o item 4 deixa de se aplicar (não há ComBat nem aparo de 1,5×IQR).
+
+O item 3 continua: o modelo usa o volume bruto, mas o VIC ganhou norma própria. Os itens 1–7 seguem valendo para quem usa BrainChart e CentileBrain (outras redes, volume rígido ou a opção desligada). Validação em [`validacao/normas.md`](validacao/normas.md).

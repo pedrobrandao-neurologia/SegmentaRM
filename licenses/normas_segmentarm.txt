@@ -1,0 +1,21 @@
+Normas SegmentaRM (models/normative/normas_segmentarm.json)
+
+Coeficientes de modelos GAMLSS ajustados pelo SegmentaRM em volumes medidos com o SynthSeg 1.0
+do próprio app. Nenhuma imagem nem volume individual é redistribuído: o arquivo contém só
+parâmetros agregados (μ e σ por idade e sexo, ν, τ, variância entre sítios, contagens).
+
+Dados de origem (todos CC0 1.0, OpenNeuro — https://openneuro.org):
+  ds004856  Dallas Lifespan Brain Study (Park DC et al., Sci Data 2025;12:846)
+  ds007522  Precision Aging Network — Healthy Minds for Life
+  ds005752  NIMH Healthy Research Volunteer Dataset
+  ds003592  Setton et al., Age differences in the functional architecture of the human brain
+            (Cereb Cortex 2022, doi:10.1093/cercor/bhac056)
+  ds000030  UCLA Consortium for Neuropsychiatric Phenomics LA5c (controles)
+  ds004173  MR-ART (Nárai et al., Sci Data 2022) — aquisição padrão
+  ds002785  AOMIC PIOP1; ds002790 AOMIC PIOP2; ds003097 AOMIC ID1000 (Snoek et al., Sci Data 2021)
+
+CC0 não exige atribuição; ainda assim, cite os conjuntos acima em trabalhos que usem estas normas.
+
+Se as normas forem reajustadas com o OASIS-3 (tools/normas_local.py), o uso fica sujeito ao
+OASIS Data Use Agreement aceito por quem baixou os dados, e o agradecimento exigido pelo OASIS
+vai junto no JSON (campo "bases").
