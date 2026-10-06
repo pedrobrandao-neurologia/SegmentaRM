@@ -563,10 +563,12 @@ um z inflado.
 
 - **CSV** longo (estrutura/agregado/lobo/assimetria/VIC/espessura volumétrica; decimal
   configurável; colunas `pct_vic`, `volume_rigido_mm3`, `metodo_volume`,
-  `dif_suave_rigido_pct` e `z_assimetria`)
+  `dif_suave_rigido_pct` e `z_assimetria`; com idade e sexo, também `norma`, `z`, `percentil`,
+  `ic90_z_inf`, `ic90_z_sup` e `mediana_esperada_mm3` em cada estrutura ou agregado com norma —
+  as normas SegmentaRM quando ativas — e a linha do cérebro total, `TCV`)
 - **JSON** completo. Traz:
   - estruturas com centroide RAS, agregados, lobos, assimetria com z, VIC, qualidade e proveniência do pré-processamento;
-  - normativo com `proveniencia`, `multiplicidade`, `ic90` e `incerteza` por z;
+  - normativo com `proveniencia`, `multiplicidade`, `ic90` e `incerteza` por z (com as normas SegmentaRM, a incerteza traz os componentes `sitio` e `curva`);
   - `alertas_qc` e `ocupacao_hipocampal`;
   - `aquisicao`: fabricante, campo, sequência, TR/TE/TI, correção de distorção;
   - `protocolo` (família) e `idade_fonte`;
@@ -576,7 +578,9 @@ um z inflado.
   `eTIV` e `thick_*`; abre no SPSS, `haven::read_sav()` e `pyreadstat`
 - **PDF** — laudo diagramado no estilo Apple (hierarquia por peso e tamanho, cartões
   arredondados, cor só com função: azul informa, laranja marca o atípico, vermelho o
-  possível erro): capa com ficha do exame, captura e mostradores; QC por grupo tecidual;
+  possível erro): capa com ficha do exame, captura, mostradores com percentil e z e um quadro
+  de **destaques normativos** (hipocampo, amígdala e corno temporal E/D, cérebro total,
+  ventrículos e VIC, com P, z, IC 90% e medidor); QC por grupo tecidual;
   comparação normativa com medidores P5–P50–P95; **volumes por região** agrupados por lobo
   (frontal, temporal, parietal, occipital, ínsula) e depois por grupo tecidual, com
   **esquerdo e direito lado a lado**, total, % do VIC e o **índice de assimetria como
@@ -610,7 +614,8 @@ das exportações.
 - **`talairach.xfm`** — transformada linear para o MNI (formato MNI Transform File)
 - **Malhas** — white/pial em `.mz3` dentro do `.zip` (com o xfm e o norm)
 - **Coorte** — uma linha larga por exame, persistida no navegador → CSV largo e `.sav`
-  (com idade, sexo, família do protocolo e a marca de **controle** usada na calibração do sítio)
+  (com idade, sexo, família do protocolo e a marca de **controle** usada na calibração do sítio;
+  com idade e sexo, também `z_*`, `pct_*`, `zinf_*` e `zsup_*` por medida e `norma_referencia`)
 
 ### Usar no R
 

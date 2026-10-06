@@ -102,3 +102,40 @@ test('normas embarcadas contra o z exato do R (pSHASHo)', { skip: !fs.existsSync
   // todas as medidas do app têm norma
   for (const k of ['CortexVol', 'CerebralWhiteMatterVol', 'SubCortGrayVol', 'VentricleVol', 'TCV', 'Left-Hippocampus', 'Right-Hippocampus', 'vic']) assert.ok(np.fenotipos[k], k)
 })
+
+test('normas próprias nos relatórios: CSV, planilha larga, JSON e PDF', { skip: !fs.existsSync(REAL) }, async () => {
+  const { statsToCSV, statsToWideRow, statsToJSON } = await import('../../lib/stats.js')
+  const { buildReport } = await import('../../lib/report.js')
+  const np = ler('models/normative/normas_segmentarm.json')
+  const r = (name, v, group, hemi) => ({ name, ptName: name, volMm3: v, group, hemi, pctBrain: 0.3, meanInt: 90, index: 1 })
+  const stats = {
+    rows: [r('Left-Hippocampus', 3600, 'subcortical', 'E'), r('Right-Hippocampus', 3900, 'subcortical', 'D'),
+      r('Left-Inf-Lat-Vent', 900, 'ventrículos', 'E'), r('Right-Inf-Lat-Vent', 600, 'ventrículos', 'D')],
+    composites: [{ id: 'CortexVol', ptName: 'Córtex', volMm3: 470e3, pctBrain: 40 }, { id: 'CerebralWhiteMatterVol', ptName: 'SB', volMm3: 430e3, pctBrain: 35 }, { id: 'VentricleVol', ptName: 'Ventrículos', volMm3: 40e3, pctBrain: 3 }],
+    lobes: [], pairs: [], brainVol: 1.2e6, hemiMethod: 'rótulos', volumeSoft: true
+  }
+  const norms = N.compareToNorms(stats, { age: 72, sex: 'F' }, { ferramentaPaciente: 'SynthSeg 1.0', metodoVolume: 'suave', normasProprias: np, vic: 1.45e6 })
+  const meta = { subject: 't', age: 72, sex: 'F', date: '2026-10-06', norms, icv: { vic_mm3: 1.45e6 }, caveats: [] }
+  // CSV por exame: norma, z, percentil, IC e mediana esperada nas linhas com norma
+  const campos = (l) => [...l.matchAll(/("(?:[^"]|"")*"|[^,]*)(,|$)/g)].map(m => m[1].replace(/^"|"$/g, '').replace(/""/g, '"')).slice(0, -1)
+  const csv = statsToCSV(stats, meta).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).map(campos)
+  const H = csv[0]; const lin = (rot) => csv.find(c => c[H.indexOf('rotulo')] === rot)
+  const hip = lin('Left-Hippocampus')
+  assert.equal(hip[H.indexOf('norma')], 'SegmentaRM')
+  assert.ok(Math.abs(+hip[H.indexOf('z')] - norms.subcorticais.find(x => x.chave === 'Left-Hippocampus').z) < 0.006)
+  assert.ok(+hip[H.indexOf('ic90_z_inf')] < +hip[H.indexOf('z')] && +hip[H.indexOf('mediana_esperada_mm3')] > 0)
+  assert.ok(lin('TCV')[H.indexOf('z')] !== '' && lin('eTIV')[H.indexOf('norma')] === 'SegmentaRM')
+  // planilha larga da coorte: z, percentil e IC por medida + norma usada
+  const { row } = statsToWideRow(stats, meta)
+  assert.equal(row.norma_referencia, 'SegmentaRM')
+  assert.ok(isFinite(row.z_Left_Hippocampus) && isFinite(row.pct_TCV) && isFinite(row.z_vic) && isFinite(row.zinf_CortexVol))
+  // JSON: referência e notas da norma própria
+  const js = JSON.parse(statsToJSON(stats, meta))
+  assert.match(js.normativo.referencia, /Normas SegmentaRM/)
+  assert.match(js.normativo.nota_normas_proprias, /sinh/)
+  // PDF: destaques normativos na capa e texto do "Como ler" das normas próprias
+  const buf = Buffer.from(await buildReport({ stats, meta, snapshot: null }))
+  if (process.env.SALVAR_PDF_NP) fs.writeFileSync(process.env.SALVAR_PDF_NP, buf)
+  const t = buf.toString('latin1')
+  for (const frase of ['Destaques normativos', 'Normas SegmentaRM', 'mesmo SynthSeg']) assert.ok(t.includes(frase), `laudo sem "${frase}"`)
+})
