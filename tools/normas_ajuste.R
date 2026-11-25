@@ -166,7 +166,9 @@ umFenotipo <- function(f) {
 res <- parallel::mclapply(FEN, function(f) tryCatch(umFenotipo(f), error = function(e) { cat(f, "FALHOU:", conditionMessage(e), "\n"); NULL }),
                           mc.cores = as.integer(Sys.getenv("NUCLEOS", "4")), mc.preschedule = FALSE)
 names(res) <- FEN
-res <- res[!vapply(res, is.null, TRUE)]
+# filho morto (falta de memória) devolve um objeto try-error, não NULL: só entra o que tem saída
+res <- res[vapply(res, function(x) is.list(x) && !is.null(x$saida), TRUE)]
+faltam <- setdiff(FEN, names(res))
 saida <- lapply(res, `[[`, "saida")
 L <- do.call(rbind, lapply(res, `[[`, "loso"))
 write.csv(L, file.path(VDIR, "loso_z.csv"), row.names = FALSE)
@@ -185,6 +187,7 @@ out <- list(
   fenotipos = saida)
 writeLines(toJSON(out, auto_unbox = TRUE, digits = NA, null = "null"), SAIDA)
 cat("→", SAIDA, "\n")
+if (length(faltam)) cat("ATENÇÃO: fenótipos SEM ajuste (fora do JSON):", paste(faltam, collapse = ", "), "\n")
 
 # fixture dos testes (tests/fixtures/normas_segmentarm_exato_R.json): z pela CDF da SHASHo do
 # gamlss.dist (qnorm(pSHASHo)) com os parâmetros EXPORTADOS, em idades da grade e entre elas
@@ -203,3 +206,5 @@ for (f in names(saida)) {
   }
 }
 writeLines(toJSON(fx, auto_unbox = TRUE, digits = NA), file.path(VDIR, "normas_segmentarm_exato_R.json"))
+# fenótipo faltando é erro: o app ficaria sem norma para ele sem ninguém notar
+if (length(faltam)) quit(status = 1)

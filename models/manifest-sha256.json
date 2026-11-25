@@ -1,5 +1,5 @@
 {
- "gerado": "2026-10-05",
+ "gerado": "2026-11-25",
  "componentes": {
   "synthseg1": {
    "descricao": "SynthSeg 1.0 (pesos tfjs convertidos do synthseg_1.0.h5 oficial)",
@@ -179,11 +179,11 @@
   },
   "regras_qc": {
    "descricao": "Regras declarativas de QC",
-   "sha256": "6dd48b20876e0b5d950c45c3f8828154665081cb29daf47c2e8e9af4f73abd32",
+   "sha256": "640b5971257ec028255bbb573dd18564d49e5349bca41262ee1dc8a016421bee",
    "arquivos": [
     {
      "arquivo": "models/qc_rules.json",
-     "sha256": "263be593b301efc092bc22f9526a4a10f8b06f6bd01e3ca549936bfcd5b58482"
+     "sha256": "17ba5f15707402ae82c2cdf5066b154e94ca97c1dfa9dd7a243dccdf5f41011e"
     }
    ]
   }

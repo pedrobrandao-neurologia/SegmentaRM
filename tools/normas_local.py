@@ -122,7 +122,7 @@ def modo_oasis3(a):
             r = r.iloc[0]
         idade = float(r[ci]) + dias / 365.25
         sx = sexo(r[cg])
-        if not sx or idade < 18:
+        if not sx or not (idade >= 18):  # NaN (idade de entrada vazia) também fica de fora
             continue
         fab, mod, campo = scanner(arq)
         vistos.add(suj)
@@ -152,7 +152,9 @@ def main():
         out = modo_csv(a)
     else:
         raise SystemExit('use --csv ou --oasis3')
-    json.dump(out, open(a.saida, 'w'), indent=0, ensure_ascii=False)
+    # células vazias viram NaN no pandas e 'NaN' não é JSON: troca por null e falha cedo se sobrar algum
+    out = [{k: (None if isinstance(v, float) and v != v else v) for k, v in o.items()} for o in out]
+    json.dump(out, open(a.saida, 'w'), indent=0, ensure_ascii=False, allow_nan=False)
     if out:
         d = pd.DataFrame(out)
         d['decada'] = (d.idade // 10 * 10).astype(int)

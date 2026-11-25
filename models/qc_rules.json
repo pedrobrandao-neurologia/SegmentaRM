@@ -78,7 +78,7 @@
       "params": {
         "anos": 5
       },
-      "mensagem": "{normas}: idade a menos de {anos} anos do limite (ou além).",
+      "mensagem": "{normas}: {criterio}.",
       "recomendacao": "Na borda da distribuição a mediana e a dispersão da norma são instáveis — os z dessas famílias aparecem em cinza.",
       "capturas": [],
       "status": "validado",

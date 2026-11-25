@@ -191,7 +191,7 @@
       <button class="hud-btn" id="wl-toggle" aria-pressed="false"
         title="Janelamento manual: com o botão ativo, arraste sobre a imagem — ↔ contraste (largura da janela) · ↕ brilho (nível). Duplo clique restaura o automático.">janela</button>
       <label class="hud-ctl">rótulos <input type="range" id="opacity" min="0" max="100" value="55"></label>
-      <select id="slicetype" class="hud-sel">
+      <select id="slicetype" class="hud-sel" aria-label="Plano de visualização">
         <option value="multi" selected>Multiplanar</option>
         <option value="axial">Axial</option>
         <option value="coronal">Coronal</option>
@@ -259,8 +259,8 @@
       <section class="panel grow">
         <h3>Regiões</h3>
         <div class="row" style="margin-bottom:8px">
-          <input type="text" id="filter" placeholder="filtrar estrutura…">
-          <select id="group-filter" style="max-width:170px"><option value="">todos os grupos</option></select>
+          <input type="text" id="filter" placeholder="filtrar estrutura…" aria-label="Filtrar estrutura">
+          <select id="group-filter" style="max-width:170px" aria-label="Filtrar por grupo"><option value="">todos os grupos</option></select>
         </div>
         <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
       </section>
@@ -291,8 +291,9 @@
         <label class="check" id="normas-proprias-wrap" hidden title="Normas ajustadas em volumes medidos com o MESMO SynthSeg do app (volume suave) em adultos saudáveis de bases abertas, com o sítio modelado: sem calibração local, a variância entre sítios entra no intervalo de 90% do z. Substituem BrainChart e CentileBrain nas medidas que cobrem."><input type="checkbox" id="opt-normas-proprias"> normas SegmentaRM (mesmo SynthSeg, sítio modelado)</label>
         <label class="check" id="recentragem-wrap" hidden title="Desconta do z o desvio que controles saudáveis medidos com o MESMO SynthSeg têm contra cada norma, por idade e sexo (nível A do plano metodológico); a escala do z continua a da norma e a incerteza entra no intervalo de 90%"><input type="checkbox" id="opt-recentragem"> recentragem pelo método (controles do mesmo SynthSeg)</label>
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
-        <p class="note">Normas SegmentaRM (próprias: mesmo SynthSeg, bases abertas CC0) ou BrainChart (Bethlehem et al., Nature 2022)
-        e CentileBrain (Ge et al., 2024), de volumes FreeSurfer. Pesquisa e QC, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>
+        <p class="note" id="norm-note">Normas SegmentaRM (controles medidos com o mesmo SynthSeg; padrão com volume suave) ou,
+        desmarcando a caixa e nas outras redes, BrainChart (Bethlehem et al., Nature 2022) e CentileBrain (Ge et al., 2024),
+        que são de volumes FreeSurfer. Pesquisa e QC, não clínico; |z| ≥ 4 sugere erro de segmentação.</p>
         <p class="note" id="norm-sub-note" hidden></p>
       </section>
 
@@ -357,7 +358,7 @@
   </aside>
 
   <!-- rodapé: log de uma linha (histórico no title) -->
-  <footer class="log"><span class="cursor">›</span><div class="console" id="console" aria-live="polite"><p>Pronto para começar.</p></div></footer>
+  <footer class="log"><span class="cursor">›</span><div class="console" id="console" role="log" aria-live="off"><p>Pronto para começar.</p></div></footer>
 </div>
 
 <!-- tutorial de erro de etapa + log exportável -->
