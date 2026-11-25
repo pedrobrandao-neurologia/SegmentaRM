@@ -427,3 +427,12 @@ tr.groupsep td {
 .alertas li.al-alerta { border-left-color: var(--accent-strong); }
 .alertas li.al-atencao { border-left-color: var(--warn); }
 .alertas li.al-ok { border-left-color: #3c9a64; }
+
+/* ---------- telas estreitas (celular): sem rolagem horizontal nem controles cortados ---------- */
+@media (max-width: 480px) {
+  .hud { flex-wrap: wrap; gap: 6px 10px; }
+  .hud-ctl input[type=range] { width: 90px; }
+  .hud-btn, .hud-sel, .btn.sm { min-height: 40px; }
+  .ladder svg { min-width: 0; }
+  .tablewrap { overflow-x: auto; }
+}

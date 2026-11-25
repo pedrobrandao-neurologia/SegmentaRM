@@ -870,6 +870,11 @@ async function clearSegmentationState ({ withConformed = false } = {}) {
   state.colormap = null
   state.stats = null
   state.norms = null
+  // alertas, ocupação hipocampal e assimetria são do exame/etapa anterior: sem zerar, uma execução
+  // que falhasse no meio podia exportá-los pareados com as estatísticas novas
+  state.alertasQC = []
+  state.hoc = null
+  state.assimetria = null
   state.qc = null
   state.surf = null
   state.thick = null
@@ -891,6 +896,14 @@ async function loadVolumeFile (file, sidecar, desc) {
   if (refuseWhileBusy()) return
   progress(0.15)
   const vol = await NVImage.loadFromFile({ file, name: file.name })
+  // outro exame = possivelmente outro paciente: identificação, idade e sexo do anterior NÃO podem
+  // valer para este (os z, os alertas e o laudo sairiam com a idade e o sexo errados, e a linha
+  // da coorte do anterior seria sobrescrita). O cabeçalho DICOM, quando há, preenche de novo.
+  if (state.rawVol) {
+    const tinha = $('age').value || $('sex').value || $('subject').value
+    $('age').value = ''; $('sex').value = ''; $('subject').value = ''
+    if (tinha) log('Novo exame: identificação, idade e sexo do exame anterior foram limpos — confira os campos.', 'ok')
+  }
   const nv = state.nv
   while (nv.volumes.length) await nv.removeVolume(nv.volumes[0])
   await nv.addVolume(vol)
@@ -1827,7 +1840,10 @@ async function runSegmentation () {
     // o SynthSeg (predict.py oficial) recebe a imagem crua: a rede foi treinada com
     // campos de viés e resoluções sintéticos, e a correção de viés/reamostragem
     // clássicas antes dela só afastam o resultado do oficial
-    const isSynthSeg = $('model').value === 'synthseg'
+    // o modelo é lido UMA vez: trocar o seletor durante o pré-processamento fazia rodar uma rede
+    // com as etapas (viés, reamostragem) decididas para outra
+    const kind = $('model').value
+    const isSynthSeg = kind === 'synthseg'
     const flags = {
       doReorient: $('opt-reorient').checked,
       doCrop: $('opt-crop').checked,
@@ -1907,7 +1923,6 @@ async function runSegmentation () {
     tlDone('conform', [{ label: 'volume conformado', view: 'conf' }])
 
     // modelo
-    const kind = $('model').value
     const variant = $('mem').value === 'low' ? 'low' : 'high'
     const isGPU = $('backend').value !== 'cpu'
     let labelsPath, colormapPath, seg
@@ -2604,11 +2619,12 @@ async function handleExport (kind) {
       }
       case 'queue': {
         const { row, labels } = statsToWideRow(state.stats, ex.meta)
+        const jaHavia = state.cohort.some(e => e.row.subject === row.subject)
         state.cohort = state.cohort.filter(e => e.row.subject !== row.subject)
         state.cohort.push({ row, labels })
         persistCohort()
         renderCohort()
-        log(`Exame "${row.subject}" adicionado à coorte (${state.cohort.length})${row.controle ? ' como CONTROLE para a calibração do sítio' : ''}.`, 'ok')
+        log(`Exame "${row.subject}" ${jaHavia ? 'SUBSTITUIU a linha de mesma identificação na' : 'adicionado à'} coorte (${state.cohort.length})${row.controle ? ' como CONTROLE para a calibração do sítio' : ''}.`, jaHavia ? 'err' : 'ok')
         if ($('coorte-controle')) $('coorte-controle').checked = false
         break
       }
@@ -2768,7 +2784,10 @@ function cohortCSV () {
 }
 
 function persistCohort () {
-  try { localStorage.setItem('segmentarm_cohort_v1', JSON.stringify(state.cohort)) } catch { /* modo privado */ }
+  try { localStorage.setItem('segmentarm_cohort_v1', JSON.stringify(state.cohort)) } catch {
+    // armazenamento cheio ou modo privado: a coorte (e os controles da calibração) sumiria ao recarregar
+    log('A coorte NÃO foi gravada neste navegador (armazenamento cheio ou modo privado) — exporte o CSV/.sav antes de fechar a página.', 'err')
+  }
 }
 function renderCohort () {
   const n = state.cohort.length
@@ -3059,9 +3078,12 @@ async function main () {
   wireInputs()
   syncButtons()
   try {
-    state.cohort = JSON.parse(localStorage.getItem('segmentarm_cohort_v1') || '[]')
+    const c = JSON.parse(localStorage.getItem('segmentarm_cohort_v1') || '[]')
+    // JSON válido mas de outro formato (null, objeto, linhas antigas sem .row) derrubava a
+    // inicialização inteira — e, com ela, a carga das normas e das preferências
+    state.cohort = Array.isArray(c) ? c.filter(e => e && e.row && typeof e.row === 'object') : []
   } catch { state.cohort = [] }
-  renderCohort()
+  try { renderCohort() } catch (e) { state.cohort = []; log('Coorte guardada ilegível — descartada: ' + e.message, 'err') }
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js').catch(() => {})
   }

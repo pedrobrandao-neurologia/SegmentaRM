@@ -12,7 +12,11 @@
 //   --previos: resultados antigos do tools/lote_synthseg_node.mjs (mesmo SynthSeg), por id sem o
 //              prefixo da base — reaproveita os volumes e só mede o VIC;
 //   --t1:      pasta com T1 já baixados (<id sem prefixo>_T1w.nii.gz), usados antes do download;
-//   --fatia k/n: só os exames de posição ≡ k (mod n) — n processos em paralelo, sem colisão.
+//   --fatia k/n: só os exames de posição ≡ k (mod n) — n processos em paralelo, sem colisão;
+//   --jsonl <pasta>: além do <id>.json, acrescenta uma linha compacta por exame (volumes suaves,
+//              VIC e metadados) em <pasta>/resultados_f<k>de<n>.jsonl. Esses arquivos são o
+//              registro DURÁVEL (versione-os): a retomada considera feito o que já está neles,
+//              mesmo numa máquina nova sem a pasta de saída. Falhas vão para <saída>/erros.jsonl.
 // O download vai 3 exames à frente (curl, respeita o proxy do ambiente). Pode parar e retomar.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,6 +28,7 @@ const args = process.argv.slice(2)
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args.splice(i, 2)[1] : null }
 const PREVIOS = opt('--previos'); const T1LOCAL = opt('--t1')
 const [FK, FN] = (opt('--fatia') || '0/1').split('/').map(Number)
+const JSONL = opt('--jsonl')
 const [MAN, RES] = args
 if (!MAN || !RES) { console.error('uso: node tools/normas_lote.mjs manifesto.json <saída> [--previos dir] [--t1 dir]'); process.exit(2) }
 fs.mkdirSync(RES, { recursive: true })
@@ -49,7 +54,8 @@ function obter (e) {
   if (e.arquivo) return Promise.resolve({ arq: e.arquivo, local: true })
   if (T1LOCAL) { const l = path.join(T1LOCAL, curto(e) + '_T1w.nii.gz'); if (fs.existsSync(l)) return Promise.resolve({ arq: l, local: true }) }
   const dest = path.join(TMP, e.id + '_T1w.nii.gz')
-  if (!pendentes.has(e.id)) pendentes.set(e.id, fs.existsSync(dest) ? Promise.resolve(dest) : baixar(e.url, dest))
+  // download que falha sai da fila: o exame tenta de novo quando chegar a vez dele
+  if (!pendentes.has(e.id)) pendentes.set(e.id, fs.existsSync(dest) ? Promise.resolve(dest) : baixar(e.url, dest).catch(err => { pendentes.delete(e.id); throw err }))
   return pendentes.get(e.id).then(arq => ({ arq, local: false }))
 }
 
@@ -71,7 +77,22 @@ async function medirVIC (arq) {
 }
 
 const rede = await carregarSynthSeg()
-const todo = man.filter((e, i) => i % FN === FK && !fs.existsSync(path.join(RES, e.id + '.json')))
+// feito = linha válida no registro durável (qualquer fatia) ou <id>.json íntegro; um JSON truncado
+// por queda no meio da escrita NÃO conta (antes a retomada o pulava e a tabela quebrava depois)
+const feitos = new Set()
+if (JSONL) {
+  fs.mkdirSync(JSONL, { recursive: true })
+  for (const f of fs.readdirSync(JSONL).filter(f => /^resultados_.*\.jsonl$/.test(f))) {
+    for (const l of fs.readFileSync(path.join(JSONL, f), 'utf8').split('\n')) {
+      if (!l.trim()) continue
+      try { const o = JSON.parse(l); if (o && o.id && o.soft) feitos.add(o.id) } catch { /* linha cortada */ }
+    }
+  }
+}
+const integro = (p) => { try { const o = JSON.parse(fs.readFileSync(p, 'utf8')); return !!(o && o.soft) } catch { return false } }
+const todo = man.filter((e, i) => i % FN === FK && !feitos.has(e.id) && !integro(path.join(RES, e.id + '.json')))
+const ARQ_JSONL = JSONL ? path.join(JSONL, `resultados_f${FK}de${FN}.jsonl`) : null
+let nOk = 0; const erros = []
 console.log(`${man.length} no manifesto, ${todo.length} a fazer; pesos ${SHA_PESOS.slice(0, 12)}`)
 for (let i = 0; i < todo.length; i++) {
   const e = todo[i]
@@ -88,13 +109,21 @@ for (let i = 0; i < todo.length; i++) {
     } else r = await segmentar(rede, arq, { tile: 128 })
     const vic = await medirVIC(arq)
     const meta = { base: e.base, sujeito: e.sujeito, sitio: e.sitio, idade: e.idade, sexo: e.sexo, fabricante: e.fabricante, modelo: e.modelo, campo: e.campo }
-    fs.writeFileSync(path.join(RES, e.id + '.json'), JSON.stringify({ id: e.id, ...meta, ...r, ...vic, tile: 128, pesos: SHA_PESOS, s: (Date.now() - t0) / 1000 }))
+    const reg = { id: e.id, ...meta, ...r, ...vic, tile: 128, pesos: SHA_PESOS, s: (Date.now() - t0) / 1000 }
+    // escrita atômica: grava ao lado e renomeia
+    const dest = path.join(RES, e.id + '.json')
+    fs.writeFileSync(dest + '.tmp', JSON.stringify(reg)); fs.renameSync(dest + '.tmp', dest)
+    if (ARQ_JSONL) { const { hard, ...compacto } = reg; fs.appendFileSync(ARQ_JSONL, JSON.stringify({ ...compacto, pesos: SHA_PESOS.slice(0, 12) }) + '\n') }
+    nOk++
     console.log(e.id, 'ok', ((Date.now() - t0) / 1000).toFixed(0) + 's', 'VIC', (vic.vic / 1000).toFixed(0), vic.vicAviso ? '⚠ ' + vic.vicAviso : '')
   } catch (err) {
     console.log(e.id, 'ERRO', err.message)
+    erros.push(e.id)
+    fs.appendFileSync(path.join(RES, 'erros.jsonl'), JSON.stringify({ id: e.id, erro: String(err.message).slice(0, 300), url: e.url || null }) + '\n')
   } finally {
     if (arq && !local) { try { fs.unlinkSync(arq) } catch {} }
     pendentes.delete(e.id)
   }
 }
-process.exit(0)
+console.log(`fim: ${nOk} ok, ${erros.length} com erro${erros.length ? ' (' + erros.slice(0, 20).join(', ') + '; ver erros.jsonl)' : ''}`)
+process.exit(erros.length ? 1 : 0)

@@ -140,8 +140,9 @@ def candidatos(pasta):
     for _, r in p.iterrows():
         sub = r.participant_id
         k = f'{ds}/{sub}/ses-1/anat/{sub}_ses-1_T1w.nii.gz'
-        if k in ks:
-            add(ds, f'ds3592_s{int(r.site)}', sub, r.age, r.sex, k)
+        # sítio ausente ('n/a') não pode derrubar a seleção inteira: a linha é pulada
+        if k in ks and pd.notna(r.site) and str(r.site).strip().replace('.0', '').isdigit():
+            add(ds, f'ds3592_s{int(float(r.site))}', sub, r.age, r.sex, k)
     # LA5c: só controles
     ds = 'ds000030'; ks = set(listar(pasta, ds)); p = participantes(pasta, ds)
     for _, r in p[p.diagnosis == 'CONTROL'].iterrows():
@@ -209,6 +210,11 @@ def main():
     os.makedirs(a.cache, exist_ok=True)
     rng = np.random.default_rng(a.semente)
     c = candidatos(a.cache)
+    # sítio presente nos dados mas sem cota sairia da amostra sem ninguém notar
+    sem_cota = sorted(set(c.sitio) - set(COTAS))
+    if sem_cota:
+        print('ATENÇÃO — sítios nos dados sem cota (fora da seleção):', ', '.join(f'{s} (n={int((c.sitio == s).sum())})' for s in sem_cota))
+    print('candidatos por base:', c.groupby('base').size().to_dict())
     por_sitio = {}
     for s, cota in COTAS.items():
         d = c[c.sitio == s]

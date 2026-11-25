@@ -39,8 +39,9 @@ export function lerNifti (arquivo) {
   const dim = [0, 1, 2, 3, 4, 5, 6, 7].map(k => i16(40 + 2 * k))
   const datatype = i16(70); const bitpix = i16(72)
   const pixdim = [0, 1, 2, 3, 4, 5, 6, 7].map(k => f32(76 + 4 * k))
-  const voxOffset = f32(108); let slope = f32(112); const inter = f32(116)
-  if (!slope) slope = 1
+  const voxOffset = f32(108); let slope = f32(112); let inter = f32(116)
+  // NIfTI: scl_slope 0 (ou não finito) = sem escala — o intercepto também é ignorado, como no nibabel
+  if (!slope || !isFinite(slope) || !isFinite(inter)) { slope = 1; inter = 0 }
   const qcode = i16(252); const scode = i16(254)
   let A
   if (scode > 0) {

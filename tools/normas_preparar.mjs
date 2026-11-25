@@ -5,7 +5,7 @@
 // código e as mesmas tabelas do app (lib/normative.js). É a base da comparação deixando um sítio
 // de fora (docs/validacao/normas.md).
 //
-//   node tools/normas_preparar.mjs <pasta de resultados> <tabela.csv> [--qc qc.json]
+//   node tools/normas_preparar.mjs <pasta de resultados (*.json e/ou resultados_*.jsonl)> <tabela.csv>
 //
 // Fenótipos (chaves do app): globais do BrainChart (CortexVol, CerebralWhiteMatterVol,
 // SubCortGrayVol, VentricleVol, TCV = córtex + SB), subcorticais E/D do CentileBrain, mais
@@ -52,9 +52,20 @@ function zAtual (v, idade, sexo) {
 }
 
 const linhas = []
-for (const f of fs.readdirSync(RES).filter(f => f.endsWith('.json')).sort()) {
-  const r = JSON.parse(fs.readFileSync(path.join(RES, f), 'utf8'))
-  if (!r.soft || !(r.idade > 0)) continue
+// entrada: <id>.json do lote e/ou resultados_*.jsonl (registro durável, uma linha por exame);
+// arquivo ou linha ilegível é avisado e pulado, e o mesmo id não entra duas vezes
+const registros = []
+for (const f of fs.readdirSync(RES).sort()) {
+  const p = path.join(RES, f)
+  try {
+    if (/^resultados_.*\.jsonl$/.test(f)) { for (const l of fs.readFileSync(p, 'utf8').split('\n')) if (l.trim()) { try { registros.push(JSON.parse(l)) } catch { console.error('linha ilegível em', f) } } }
+    else if (f.endsWith('.json')) registros.push(JSON.parse(fs.readFileSync(p, 'utf8')))
+  } catch (e) { console.error('ilegível, pulado:', f, e.message) }
+}
+const vistos = new Set()
+for (const r of registros.sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+  if (!r || !r.soft || !(r.idade > 0) || vistos.has(r.id)) continue
+  vistos.add(r.id)
   const o = { id: r.id, base: r.base, sitio: r.sitio, idade: r.idade, sexo: r.sexo, fabricante: r.fabricante, modelo: r.modelo, campo: r.campo, vic: r.vic, vicAviso: r.vicAviso ? 1 : 0 }
   for (const [k, g] of Object.entries(FENOTIPOS)) o[k] = g(r.soft)
   Object.assign(o, zAtual(r.soft, r.idade, r.sexo))
