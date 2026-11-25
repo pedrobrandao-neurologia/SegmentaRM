@@ -92,6 +92,9 @@ if (JSONL) {
 const integro = (p) => { try { const o = JSON.parse(fs.readFileSync(p, 'utf8')); return !!(o && o.soft) } catch { return false } }
 const todo = man.filter((e, i) => i % FN === FK && !feitos.has(e.id) && !integro(path.join(RES, e.id + '.json')))
 const ARQ_JSONL = JSONL ? path.join(JSONL, `resultados_f${FK}de${FN}.jsonl`) : null
+// processo morto no meio de um append deixa a última linha sem quebra: sem isto o próximo registro
+// colaria nela e os dois se perderiam
+if (ARQ_JSONL && fs.existsSync(ARQ_JSONL)) { const t = fs.readFileSync(ARQ_JSONL); if (t.length && t[t.length - 1] !== 10) fs.appendFileSync(ARQ_JSONL, '\n') }
 let nOk = 0; const erros = []
 console.log(`${man.length} no manifesto, ${todo.length} a fazer; pesos ${SHA_PESOS.slice(0, 12)}`)
 for (let i = 0; i < todo.length; i++) {

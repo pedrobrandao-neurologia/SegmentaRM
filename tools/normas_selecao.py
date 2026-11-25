@@ -55,6 +55,22 @@ COTAS = {
 }
 
 
+# 1000 Functional Connectomes (INDI/NITRC), no S3 público do INDI: download anônimo, uso NÃO
+# comercial (CC BY-NC) — entra só com --indi e vai para um arquivo de normas separado do CC0.
+# Sítios com idade e sexo em participants.tsv; o S3 não traz fabricante nem campo do scanner.
+S3_INDI = 'https://s3.amazonaws.com/fcp-indi'
+COTAS_INDI = {
+    'ICBM': 86, 'Milwaukee_b': 46, 'AnnArbor_b': 30, 'Beijing_Zang': 25, 'Dallas': 24, 'Atlanta': 20,
+    'Munchen': 16, 'Oulu': 15, 'Leipzig': 15, 'Pittsburgh': 15, 'Orangeburg': 15, 'Cambridge_Buckner': 12,
+    'Berlin_Margulies': 12, 'Queensland': 12, 'Baltimore': 12, 'PaloAlto': 12, 'NewYork_a': 12,
+    'NewYork_b': 12, 'Bangor': 10, 'Oxford': 10, 'Newark': 10, 'SaintLouis': 10, 'NewHaven_a': 10,
+    'NewHaven_b': 10, 'AnnArbor_a': 8, 'Leiden_2180': 6, 'Leiden_2200': 6,
+}
+PAIS_INDI = {'ICBM': 'Canadá', 'Beijing_Zang': 'China', 'Oulu': 'Finlândia', 'Munchen': 'Alemanha', 'Leipzig': 'Alemanha',
+             'Berlin_Margulies': 'Alemanha', 'Queensland': 'Austrália', 'Bangor': 'Reino Unido', 'Oxford': 'Reino Unido',
+             'Leiden_2180': 'Holanda', 'Leiden_2200': 'Holanda'}
+
+
 def get(url):
     return urllib.request.urlopen(url, context=CTX, timeout=60).read()
 
@@ -169,6 +185,52 @@ def candidatos(pasta):
     return pd.DataFrame(linhas)
 
 
+def candidatos_indi(pasta):
+    """1000 Functional Connectomes: adultos com idade e sexo e T1 em sourcedata/ (imagem com crânio)"""
+    linhas = []
+    for site in COTAS_INDI:
+        pref = f'data/Projects/FCON1000/{site}/'
+        p = os.path.join(pasta, f'fcon1000_{site}.keys.json')
+        if not os.path.exists(p):
+            tok, ks = None, []
+            while True:
+                q = {'list-type': '2', 'prefix': pref + 'sourcedata/', 'max-keys': '1000'}
+                if tok:
+                    q['continuation-token'] = tok
+                x = get(S3_INDI + '?' + urllib.parse.urlencode(q)).decode()
+                ks += re.findall(r'<Key>([^<]*)</Key>', x)
+                m = re.search(r'<NextContinuationToken>([^<]*)<', x)
+                if not m:
+                    break
+                tok = m.group(1)
+            json.dump(ks, open(p, 'w'))
+        ks = set(json.load(open(p)))
+        t = pd.read_csv(cache(pasta, f'fcon1000_{site}.participants.tsv', f'{S3_INDI}/{pref}participants.tsv'), sep='\t', dtype=str)
+        for _, r in t.iterrows():
+            sub = str(r.get('participant_id', '')).strip()
+            k = f'{pref}sourcedata/{sub}/anat/{sub}_T1w.nii.gz'
+            sx = sexo(r.get('sex'))
+            try:
+                idade = float(r.get('age'))
+            except (TypeError, ValueError):
+                continue
+            if sx and 18 <= idade <= 100 and k in ks:  # idades-sentinela (9999) ficam de fora
+                linhas.append(dict(base='fcon1000', sujeito=f'{site}_{sub}', sitio='fcon_' + site.lower(), idade=idade, sexo=sx, chave=k, site=site))
+    return pd.DataFrame(linhas)
+
+
+def intercalar(por_sitio):
+    """intercalação ponderada (round-robin suave) entre sítios"""
+    fila, peso, pos, ordem = list(por_sitio), {s: len(v) for s, v in por_sitio.items()}, {s: 0 for s in por_sitio}, []
+    credito = {s: 0.0 for s in fila}; total = sum(peso.values())
+    while len(ordem) < total:
+        for s in fila:
+            credito[s] += peso[s] / total
+        s = max((s for s in fila if pos[s] < peso[s]), key=lambda s: credito[s])
+        credito[s] -= 1; ordem.append(por_sitio[s].iloc[pos[s]]); pos[s] += 1
+    return ordem
+
+
 def estratificar(d, cota, rng):
     """amostra até `cota` exames, igual por faixa de 5 anos (o que sobra vai às faixas cheias),
     sexo alternado; devolve em ordem intercalada por faixa (qualquer prefixo cobre as idades)"""
@@ -206,6 +268,7 @@ def main():
     ap.add_argument('--dlbs', default=None, help='selecao.json do tools/dlbs_selecao.py (entra inteiro)')
     ap.add_argument('--semente', type=int, default=20261003)
     ap.add_argument('--sem-sidecar', action='store_true', help='não baixa os sidecars (scanner)')
+    ap.add_argument('--indi', action='store_true', help='acrescenta o 1000 Functional Connectomes (S3 do INDI; CC BY-NC)')
     a = ap.parse_args()
     os.makedirs(a.cache, exist_ok=True)
     rng = np.random.default_rng(a.semente)
@@ -220,14 +283,7 @@ def main():
         d = c[c.sitio == s]
         if len(d):
             por_sitio[s] = estratificar(d, cota, rng)
-    # intercalação ponderada (round-robin suave) entre sítios
-    fila, peso, pos, ordem = list(por_sitio), {s: len(v) for s, v in por_sitio.items()}, {s: 0 for s in por_sitio}, []
-    credito = {s: 0.0 for s in fila}; total = sum(peso.values())
-    while len(ordem) < total:
-        for s in fila:
-            credito[s] += peso[s] / total
-        s = max((s for s in fila if pos[s] < peso[s]), key=lambda s: credito[s])
-        credito[s] -= 1; ordem.append(por_sitio[s].iloc[pos[s]]); pos[s] += 1
+    ordem = intercalar(por_sitio)
     out = []
     if a.dlbs:
         meta = BASES['ds004856']
@@ -247,7 +303,19 @@ def main():
                         idade=round(float(r.idade), 2), sexo=r.sexo, fabricante=fab, modelo=mod,
                         campo=campo, serie=sc.get('DeviceSerialNumber'), licenca='CC0',
                         url=f'{S3}/{r.chave}'))
-    json.dump(out, open(a.saida, 'w'), indent=0, ensure_ascii=False)
+    if a.indi:
+        # depois das bases CC0 (o lote segue a ordem do manifesto): se o lote parar no meio, o
+        # conjunto CC0 fica completo primeiro. Semente própria para não mexer na seleção CC0.
+        rng_i = np.random.default_rng(a.semente + 1)
+        ci = candidatos_indi(a.cache)
+        print('1000 Functional Connectomes — candidatos:', len(ci), 'em', ci.sitio.nunique(), 'sítios')
+        pi = {'fcon_' + s.lower(): estratificar(ci[ci.site == s], q, rng_i) for s, q in COTAS_INDI.items() if (ci.site == s).any()}
+        for r in intercalar(pi):
+            out.append(dict(id=f'fcon1000_{r.sujeito}', base='fcon1000', sujeito=r.sujeito, sitio=r.sitio,
+                            idade=round(float(r.idade), 2), sexo=r.sexo, fabricante=None, modelo=None, campo=None,
+                            pais=PAIS_INDI.get(r.site, 'EUA'), licenca='CC BY-NC (1000 Functional Connectomes / INDI)',
+                            url=f'{S3_INDI}/{r.chave}'))
+    json.dump(out, open(a.saida, 'w'), indent=0, ensure_ascii=False, allow_nan=False)
     df = pd.DataFrame(out)
     print(len(out), 'exames')
     print(df.groupby('sitio').agg(n=('id', 'size'), idade_min=('idade', 'min'), idade_max=('idade', 'max'),
