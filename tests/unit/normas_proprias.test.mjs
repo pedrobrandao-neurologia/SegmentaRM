@@ -94,13 +94,19 @@ test('calibração contra as normas próprias tem chave própria', () => {
 
 const REAL = path.join(RAIZ, 'models/normative/normas_segmentarm.json')
 test('normas embarcadas contra o z exato do R (pSHASHo)', { skip: !fs.existsSync(REAL) }, () => {
-  const np = ler('models/normative/normas_segmentarm.json')
-  const fx = ler('tests/fixtures/normas_segmentarm_exato_R.json')
-  let pior = 0
-  for (const e of fx) pior = Math.max(pior, Math.abs(N.avaliarProprio(np, e.fen, e.sexo, e.idade, e.v).z - e.z))
-  assert.ok(pior < 1e-6, `|Δz| máx ${pior}`)
-  // todas as medidas do app têm norma
-  for (const k of ['CortexVol', 'CerebralWhiteMatterVol', 'SubCortGrayVol', 'VentricleVol', 'TCV', 'Left-Hippocampus', 'Right-Hippocampus', 'vic']) assert.ok(np.fenotipos[k], k)
+  // as duas amostras embarcadas: só bases CC0 e ampliada (com bases de uso não comercial)
+  for (const [arq, fixture] of [['normas_segmentarm.json', 'normas_segmentarm_exato_R.json'], ['normas_segmentarm_ampliadas.json', 'normas_segmentarm_ampliadas_exato_R.json']]) {
+    const np = ler('models/normative/' + arq)
+    const fx = ler('tests/fixtures/' + fixture)
+    let pior = 0
+    for (const e of fx) pior = Math.max(pior, Math.abs(N.avaliarProprio(np, e.fen, e.sexo, e.idade, e.v).z - e.z))
+    assert.ok(pior < 1e-6, `${arq}: |Δz| máx ${pior}`)
+    // todas as medidas do app têm norma
+    for (const k of ['CortexVol', 'CerebralWhiteMatterVol', 'SubCortGrayVol', 'VentricleVol', 'TCV', 'Left-Hippocampus', 'Right-Hippocampus', 'vic']) assert.ok(np.fenotipos[k], `${arq}: ${k}`)
+    assert.ok(np.licenca && np.versao && np.bases, `${arq}: licença, versão e bases declaradas`)
+  }
+  assert.match(ler('models/normative/normas_segmentarm.json').licenca, /^CC0/)
+  assert.match(ler('models/normative/normas_segmentarm_ampliadas.json').licenca, /não comercial/)
 })
 
 test('normas próprias nos relatórios: CSV, planilha larga, JSON e PDF', { skip: !fs.existsSync(REAL) }, async () => {

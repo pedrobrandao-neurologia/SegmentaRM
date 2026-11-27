@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-25",
+ "gerado": "2026-11-27",
  "componentes": {
   "synthseg1": {
    "descricao": "SynthSeg 1.0 (pesos tfjs convertidos do synthseg_1.0.h5 oficial)",
@@ -139,11 +139,21 @@
   },
   "normas_segmentarm": {
    "descricao": "Normas SegmentaRM: GAMLSS (SHASHo, sítio aleatório) em volumes do mesmo SynthSeg, bases abertas CC0",
-   "sha256": "6ed70f830a692b700b0c758c682c56cf80888b3fce8cee8d7c3297f3d8d3cca7",
+   "sha256": "073333b117c24a3fb7f2873bd8e6d9c26f478ddd0b9388a938f0a09cc9829082",
    "arquivos": [
     {
      "arquivo": "models/normative/normas_segmentarm.json",
-     "sha256": "21b9c31eae7f60a10f1f655f06f739ff1bbfa516004e63d65dd1e4976e12626f"
+     "sha256": "0089eb289386be579a18f540cb424b532ee690b616fb2866af5a3b7ca8b543b4"
+    }
+   ]
+  },
+  "normas_segmentarm_ampliadas": {
+   "descricao": "Normas SegmentaRM ampliadas: bases CC0 + 1000 Functional Connectomes (uso não comercial)",
+   "sha256": "ae6b9b386aa25f64ef69ce10c97b702b80dd6936356ad5dccad3531ae36e0ebf",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/normas_segmentarm_ampliadas.json",
+     "sha256": "b5f2ab818ad4f4d51b4377459f1a7d829f62779067456a8bcae59a07f477f083"
     }
    ]
   },

@@ -409,10 +409,20 @@ Informando **idade e sexo** (lidos do DICOM quando há: a idade é calculada pel
 exame**, não pela do processamento), os volumes são comparados com normas por idade e sexo.
 
 **Normas SegmentaRM (padrão com o SynthSeg, volume suave).** São curvas próprias, ajustadas em
-volumes medidos com o **mesmo SynthSeg do app**. A amostra é de 641 adultos saudáveis de bases
-abertas CC0 do OpenNeuro (14 sítios Philips, Siemens e GE, todos 3 T; 18–89 anos), com o
-**sítio modelado**. Detalhes em [`docs/normas-proprias.md`](docs/normas-proprias.md) e
-[`docs/validacao/normas.md`](docs/validacao/normas.md).
+volumes medidos com o **mesmo SynthSeg do app**, com o **sítio modelado**. Há duas amostras, e
+o seletor "amostra" do painel troca entre elas (a escolha fica salva no navegador):
+
+- **ampliada (padrão):** 1026 adultos saudáveis de 35 sítios, 18–89 anos — as bases CC0 do
+  OpenNeuro mais 385 exames de 21 sítios do *1000 Functional Connectomes* (EUA, Canadá,
+  Alemanha, China, Reino Unido, Finlândia, Austrália e Holanda). Os dados do FCON são
+  **CC BY-NC**: esta amostra é de **uso não comercial** (`licenses/normas_segmentarm.txt`).
+- **só CC0:** 641 adultos de 14 sítios (Philips, Siemens e GE, 3 T), sem restrição de uso.
+
+Detalhes em [`docs/normas-proprias.md`](docs/normas-proprias.md); validações em
+[`docs/validacao/normas_ampliadas.md`](docs/validacao/normas_ampliadas.md),
+[`docs/validacao/normas.md`](docs/validacao/normas.md) (só CC0) e
+[`docs/validacao/normas_externa.md`](docs/validacao/normas_externa.md) (CC0 em 21 sítios que
+ela nunca viu).
 
 - Modelo: GAMLSS por estrutura, SHASHo (ou normal) sobre o log do volume, com P-spline da idade,
   sexo e sítio como efeito aleatório. O z sai em forma fechada:
@@ -688,7 +698,8 @@ models/synthsurf_v10_fp16.h5           checkpoint enxugado (24,4 MB) + scripts d
 models/fastsurfer/                     FastSurferCNN v1 f32 (3×7,2 MB) + manifesto
 models/normative/brainchart.json       curvas normativas vendorizadas
 models/normative/subcortical.json      centis subcorticais (CentileBrain)
-models/normative/normas_segmentarm.json       normas próprias (mesmo SynthSeg, 641 controles, 14 sítios)
+models/normative/normas_segmentarm.json       normas próprias (mesmo SynthSeg, só CC0: 641 controles, 14 sítios)
+models/normative/normas_segmentarm_ampliadas.json  idem, ampliada: 1026 controles, 35 sítios (uso não comercial)
 models/normative/recentragem_synthseg.json    recentragem do z pelo método (controles do DLBS)
 models/normative/referencia_mesmo_metodo.json assimetria e HOC por idade (DLBS, SynthSeg do app)
 models/normative/erro_medida.json      teste-reteste por estrutura (IC 90% do z)
@@ -703,12 +714,13 @@ tools/convert_fastsurfer_tfjs.py       conversor FastSurferCNN (reprodutível, s
 tools/synthseg_node.mjs · tools/lote_synthseg_node.mjs  o SynthSeg do app em Node (lote offline)
 tools/dlbs_selecao.py · tools/referencias_dlbs.py      seleção do DLBS, referências do mesmo método, comparação com o FreeSurfer
 tools/recentragem_dlbs.mjs             recentragem do z (nível A) com as normas do app + relatório
-tools/normas_selecao.py                normas próprias: manifesto das bases CC0 (OpenNeuro, S3)
+tools/normas_selecao.py                normas próprias: manifesto das bases (OpenNeuro CC0; --indi soma o FCON1000)
 tools/normas_lote.mjs                  normas próprias: baixa → SynthSeg + VIC → apaga a imagem
+tools/normas_bloco.sh                  normas próprias: um bloco retomável do lote (registro em dados/normas/*.jsonl)
 tools/normas_local.py                  normas próprias: exames locais (OASIS-3, controles do serviço)
 tools/normas_preparar.mjs              normas próprias: tabela + z do pipeline anterior
 tools/normas_ajuste.R                  normas próprias: GAMLSS com sítio aleatório + validação
-tools/normas_relatorio.py              normas próprias: docs/validacao/normas.md
+tools/normas_relatorio.py              normas próprias: relatórios de docs/validacao/normas*.md
 tools/manifesto_sha256.mjs             regenera models/manifest-sha256.json
 tests/unit/ · tests/browser/ · tests/golden/  testes (Node, Chromium) e exames de referência
 docs/                                  plano metodológico e validação
