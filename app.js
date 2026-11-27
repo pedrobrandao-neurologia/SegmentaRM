@@ -66,6 +66,7 @@ const state = {
   synthsr: null,       // { vol: NVImage, buf, flip } — MP-RAGE T1 1 mm sintético (SynthSR)
   segConf: null,       // Uint8Array — posterior máxima por voxel (confiança da rede)
   segVolSoft: null,    // Float64Array — volume soft por canal do SynthSeg (voxels; soma dos posteriors, como o --vol oficial)
+  normasAmostras: null,        // { cc0, ampliada } — arquivos de normas próprias carregados
   normasProprias: null,        // models/normative/normas_segmentarm.json (normas do mesmo método)
   normasPropriasPreferidas: false,
   normasPropriasAtivas: false,
@@ -2353,7 +2354,7 @@ function reprodutibilidadeMeta () {
   if (state.synthsr) add('synthsr')
   if (state.norms && state.norms.available) {
     const pv = state.norms.proveniencia || {}
-    if (pv.segmentarm) add('normas_segmentarm')
+    if (pv.segmentarm) add(state.normasAmostras && state.normasProprias === state.normasAmostras.ampliada ? 'normas_segmentarm_ampliadas' : 'normas_segmentarm')
     // com as normas próprias, o BrainChart fica só nas parcelas corticais
     if (!pv.segmentarm || (state.norms.parcels && state.norms.parcels.length)) add('normas_brainchart')
     if (pv.centilebrain) add('normas_centilebrain')
@@ -2692,7 +2693,31 @@ async function carregarNormasProprias () {
   try {
     const r = await fetch('./models/normative/normas_segmentarm.json')
     if (!r.ok) return
-    state.normasProprias = await r.json()
+    // duas amostras: só bases CC0 e ampliada (inclui bases de uso não comercial); a ampliada é
+    // opcional — sem o arquivo dela (ou offline sem cache), ficam as CC0
+    state.normasAmostras = { cc0: await r.json() }
+    try {
+      const ra = await fetch('./models/normative/normas_segmentarm_ampliadas.json')
+      if (ra.ok) state.normasAmostras.ampliada = await ra.json()
+    } catch { /* sem a amostra ampliada */ }
+    let amostra = null
+    try { amostra = localStorage.getItem('segmentarm_normas_amostra') } catch { /* modo privado */ }
+    if (!state.normasAmostras[amostra]) amostra = state.normasAmostras.ampliada && state.normasAmostras.ampliada.ativoPorPadrao ? 'ampliada' : 'cc0'
+    state.normasProprias = state.normasAmostras[amostra]
+    const selA = $('normas-amostra')
+    if (selA && state.normasAmostras.ampliada) {
+      const rot = (np, nome) => `${nome} — n = ${np.n}, ${np.nSitios} sítios`
+      selA.innerHTML = `<option value="ampliada">${rot(state.normasAmostras.ampliada, 'ampliada (inclui bases de uso não comercial)')}</option><option value="cc0">${rot(state.normasAmostras.cc0, 'só bases CC0')}</option>`
+      selA.value = amostra
+      $('normas-amostra-wrap').hidden = false
+      selA.onchange = () => {
+        state.normasProprias = state.normasAmostras[selA.value] || state.normasAmostras.cc0
+        try { localStorage.setItem('segmentarm_normas_amostra', selA.value) } catch { /* modo privado */ }
+        atualizarRecentragem()
+        atualizarCalibracao()
+        updateNorms()
+      }
+    }
     let pref = null
     try { pref = localStorage.getItem('segmentarm_normas_proprias') } catch { /* modo privado */ }
     state.normasPropriasPreferidas = pref == null ? !!state.normasProprias.ativoPorPadrao : pref === '1'

@@ -2,7 +2,7 @@
 # com o MESMO método do app (SynthSeg 1.0, volume suave, bloco 128³), com o SÍTIO como efeito
 # aleatório, e validação deixando um sítio de fora. Ver docs/normas-proprias.md.
 #
-#   Rscript tools/normas_ajuste.R tabela.csv normas_segmentarm.json validacao_dir [B] [padrao]
+#   Rscript tools/normas_ajuste.R tabela.csv normas_segmentarm.json validacao_dir [B] [padrao] [versao]
 #     tabela.csv  ← tools/normas_preparar.mjs
 #     B           réplicas do bootstrap por sítio para o erro-padrão da curva (padrão 40; 0 = sem)
 #     padrao      1 = o app usa estas normas por padrão (decidido pela validação); 0 = opcional
@@ -23,6 +23,7 @@ args <- commandArgs(TRUE)
 if (length(args) < 3) stop("uso: Rscript tools/normas_ajuste.R tabela.csv saida.json validacao_dir [B]")
 TAB <- args[1]; SAIDA <- args[2]; VDIR <- args[3]; B <- if (length(args) >= 4) as.integer(args[4]) else 40L
 PADRAO <- length(args) >= 5 && args[5] == "1"
+VERSAO <- if (length(args) >= 6) args[6] else "1.0"
 # bases conhecidas → nome, DOI e licença (as de acesso condicionado levam o agradecimento exigido)
 BASES <- list(
   ds004856 = list(nome = "Dallas Lifespan Brain Study", doi = "10.18112/openneuro.ds004856", licenca = "CC0"),
@@ -34,6 +35,7 @@ BASES <- list(
   ds002785 = list(nome = "AOMIC PIOP1", doi = "10.18112/openneuro.ds002785", licenca = "CC0"),
   ds002790 = list(nome = "AOMIC PIOP2", doi = "10.18112/openneuro.ds002790", licenca = "CC0"),
   ds003097 = list(nome = "AOMIC ID1000", doi = "10.18112/openneuro.ds003097", licenca = "CC0"),
+  fcon1000 = list(nome = "1000 Functional Connectomes Project (INDI/NITRC)", doi = "10.1073/pnas.0911855107", licenca = "CC BY-NC (uso não comercial)"),
   oasis3 = list(nome = "OASIS-3", doi = "10.1101/2019.12.13.19014902", licenca = "OASIS-3 Data Use Agreement",
                 agradecimento = "Data were provided in part by OASIS-3: Longitudinal Multimodal Neuroimaging. Principal Investigators: T. Benzinger, D. Marcus, J. Morris; NIH P30 AG066444, P50 AG00561, P30 NS09857781, P01 AG026276, P01 AG003991, R01 AG043434, UL1 TR000448, R01 EB009352."))
 dir.create(VDIR, showWarnings = FALSE, recursive = TRUE)
@@ -163,7 +165,15 @@ umFenotipo <- function(f) {
   list(saida = saida, loso = do.call(rbind, loso))
 }
 # fenótipos em paralelo (NUCLEOS no ambiente; padrão 4)
-res <- parallel::mclapply(FEN, function(f) tryCatch(umFenotipo(f), error = function(e) { cat(f, "FALHOU:", conditionMessage(e), "\n"); NULL }),
+# cada fenótipo pronto fica em validacao_dir/cache/<fenótipo>.rds: se o ajuste for interrompido
+# (limite de tempo da máquina), rodar de novo com a MESMA tabela retoma de onde parou
+CACHE <- file.path(VDIR, "cache"); dir.create(CACHE, showWarnings = FALSE)
+comCache <- function(f) {
+  arq <- file.path(CACHE, paste0(gsub("[^A-Za-z0-9_.-]", "_", f), "_", nrow(d0), ".rds"))
+  if (file.exists(arq)) return(readRDS(arq))
+  r <- umFenotipo(f); saveRDS(r, arq); r
+}
+res <- parallel::mclapply(FEN, function(f) tryCatch(comCache(f), error = function(e) { cat(f, "FALHOU:", conditionMessage(e), "\n"); NULL }),
                           mc.cores = as.integer(Sys.getenv("NUCLEOS", "4")), mc.preschedule = FALSE)
 names(res) <- FEN
 # filho morto (falta de memória) devolve um objeto try-error, não NULL: só entra o que tem saída
@@ -175,10 +185,11 @@ write.csv(L, file.path(VDIR, "loso_z.csv"), row.names = FALSE)
 
 bs <- unique(d0$base)
 out <- list(
-  versao = "1.0", gerado = as.character(Sys.Date()), ativoPorPadrao = PADRAO,
+  versao = VERSAO, gerado = as.character(Sys.Date()), ativoPorPadrao = PADRAO,
+  licenca = if (all(vapply(bs, function(b) identical((BASES[[b]] %||% list(licenca = "?"))$licenca, "CC0"), TRUE))) "CC0 (todas as bases)" else "inclui bases de uso não comercial (ver bases): uso não comercial",
   bases = lapply(setNames(bs, bs), function(b) c(BASES[[b]] %||% list(nome = b, licenca = "uso local"), list(n = sum(d0$base == b)))),
   faixa = range(d0$idade),
-  fonte = "Normas SegmentaRM: GAMLSS por fenótipo em volumes do SynthSeg 1.0 do app (volume suave, bloco 128³, espelhamento E/D) de adultos saudáveis de bases abertas CC0 do OpenNeuro; sítio como efeito aleatório",
+  fonte = "Normas SegmentaRM: GAMLSS por fenótipo em volumes do SynthSeg 1.0 do app (volume suave, bloco 128³, espelhamento E/D) de adultos saudáveis de bases abertas (ver bases e licenca); sítio como efeito aleatório",
   gerador = "tools/normas_selecao.py → tools/normas_lote.mjs → tools/normas_preparar.mjs → tools/normas_ajuste.R",
   modelo = "log V ~ SHASHo (ou normal, pelo BIC); mu = pb(idade) + sexo + random(sitio); sigma = pb(idade) + sexo; nu, tau constantes. Curva populacional com efeito de sítio = 0.",
   z = "z = sinh(tau * asinh((ln V - mu) / sigma) - nu)",

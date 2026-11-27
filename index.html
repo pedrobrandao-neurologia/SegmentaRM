@@ -289,6 +289,7 @@
       <section class="panel" id="norm-panel" hidden>
         <h3>Normativo — idade e sexo</h3>
         <label class="check" id="normas-proprias-wrap" hidden title="Normas ajustadas em volumes medidos com o MESMO SynthSeg do app (volume suave) em adultos saudáveis de bases abertas, com o sítio modelado: sem calibração local, a variância entre sítios entra no intervalo de 90% do z. Substituem BrainChart e CentileBrain nas medidas que cobrem."><input type="checkbox" id="opt-normas-proprias"> normas SegmentaRM (mesmo SynthSeg, sítio modelado)</label>
+        <label class="check" id="normas-amostra-wrap" hidden title="Amostra de controles das normas SegmentaRM. A ampliada soma às bases CC0 sítios de outros países (1000 Functional Connectomes), cujos dados são de uso não comercial; a amostra só CC0 não tem essa restrição.">amostra <select id="normas-amostra" aria-label="Amostra das normas SegmentaRM"></select></label>
         <label class="check" id="recentragem-wrap" hidden title="Desconta do z o desvio que controles saudáveis medidos com o MESMO SynthSeg têm contra cada norma, por idade e sexo (nível A do plano metodológico); a escala do z continua a da norma e a incerteza entra no intervalo de 90%"><input type="checkbox" id="opt-recentragem"> recentragem pelo método (controles do mesmo SynthSeg)</label>
         <div class="tablewrap" style="max-height:260px"><table id="norm-table"><thead></thead><tbody></tbody></table></div>
         <p class="note" id="norm-note">Normas SegmentaRM (controles medidos com o mesmo SynthSeg; padrão com volume suave) ou,
