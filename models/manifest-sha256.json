@@ -1,5 +1,5 @@
 {
- "gerado": "2026-11-25",
+ "gerado": "2026-11-27",
  "componentes": {
   "synthseg1": {
    "descricao": "SynthSeg 1.0 (pesos tfjs convertidos do synthseg_1.0.h5 oficial)",
@@ -139,11 +139,11 @@
   },
   "normas_segmentarm": {
    "descricao": "Normas SegmentaRM: GAMLSS (SHASHo, sítio aleatório) em volumes do mesmo SynthSeg, bases abertas CC0",
-   "sha256": "6ed70f830a692b700b0c758c682c56cf80888b3fce8cee8d7c3297f3d8d3cca7",
+   "sha256": "7f6c03acc7591fa7fbc950901071d8e5ea77c33708905d3a2be157593e6ffbef",
    "arquivos": [
     {
      "arquivo": "models/normative/normas_segmentarm.json",
-     "sha256": "21b9c31eae7f60a10f1f655f06f739ff1bbfa516004e63d65dd1e4976e12626f"
+     "sha256": "ed738c3683a30d95b0668849ac3b04b6e4c065995f2785872149bf64ffff11d6"
     }
    ]
   },

@@ -95,9 +95,9 @@ umFenotipo <- function(f) {
   t0 <- Sys.time()
   set.seed(20261003 + match(f, FEN))
   loso <- list()
-  d <- d0[is.finite(d0[[f]]) & d0[[f]] > 0, c("id", "sitio", "idade", "sexoM", "fabricante", f)]
+  d <- d0[is.finite(d0[[f]]) & d0[[f]] > 0, c("id", "sitio", "idade", "sexoM", f)]  # só as colunas do modelo: o gamlss recusa NA em qualquer outra
   if (f == "vic") d <- d[d0$vicAviso[match(d$id, d0$id)] == 0, ]
-  names(d)[6] <- "y"; d$ly <- log(d$y); d$sitio <- droplevels(d$sitio)
+  names(d)[5] <- "y"; d$ly <- log(d$y); d$sitio <- droplevels(d$sitio)
   # 1º ajuste → exclui falha técnica (|z| > 5) → ajuste final
   a <- ajusteFenotipo(d)
   zz <- zSHASHo(d$ly, fitted(a$m, "mu"), fitted(a$m, "sigma"),

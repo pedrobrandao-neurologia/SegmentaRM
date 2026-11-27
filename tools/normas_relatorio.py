@@ -80,19 +80,32 @@ def adaptacao(df, col, k, B=200, seed=20261003):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--tabela', required=True); ap.add_argument('--loso', required=True)
+    ap.add_argument('--tabela', required=True); ap.add_argument('--loso', default=None)
+    ap.add_argument('--externo', action='store_true', help='validação EXTERNA: z de todos os exames da tabela pelas normas dadas (sítios que não entraram no ajuste), em vez do loso_z.csv')
     ap.add_argument('--normas', required=True); ap.add_argument('--saida', required=True)
     a = ap.parse_args()
     t = pd.read_csv(a.tabela)
-    L = pd.read_csv(a.loso)
     N = json.load(open(a.normas))
+    if a.externo:
+        # z pela curva populacional das normas (mesma fórmula do app), exame a exame
+        I = N['idades']
+        def z_de(e, sexo, idade, v):
+            g = e[sexo]; x = min(max(idade, I[0]), I[-1]); i = min(int(x - I[0]), len(I) - 2); t = x - I[i]
+            mu = g['mu'][i] + t * (g['mu'][i + 1] - g['mu'][i]); sg = g['sigma'][i] + t * (g['sigma'][i + 1] - g['sigma'][i])
+            return math.sinh(e['tau'] * math.asinh((math.log(v) - mu) / sg) - e['nu'])
+        t0 = pd.read_csv(a.tabela)
+        L = pd.DataFrame([dict(fenotipo=k, id=r['id'], sitio=r['sitio'], z=z_de(e, r['sexo'], r['idade'], r[k]))
+                          for k, e in N['fenotipos'].items() if k in t0 for _, r in t0.iterrows()
+                          if pd.notna(r[k]) and r[k] > 0 and not (k == 'vic' and r.get('vicAviso', 0) == 1)])
+    else:
+        L = pd.read_csv(a.loso)
     zp = L.pivot_table(index='id', columns='fenotipo', values='z').add_prefix('zp_')
     t = t.set_index('id')
     t['decada'] = (t.idade // 10 * 10).clip(upper=80).astype(int)
     linhas = []
     w = linhas.append
 
-    w('# Normas SegmentaRM — validação deixando um sítio de fora')
+    w('# Normas SegmentaRM — validação externa (sítios que não entraram no ajuste)' if a.externo else '# Normas SegmentaRM — validação deixando um sítio de fora')
     w('')
     w(f"Gerado por `tools/normas_relatorio.py` em {N.get('gerado', '')} (normas versão {N.get('versao', '')}). "
       'Não edite à mão: rode o pipeline de `docs/normas-proprias.md` §4.')
@@ -106,7 +119,8 @@ def main():
     w('| Sítio | Base | Scanner | n | Idades | F/M |')
     w('|---|---|---|---|---|---|')
     for s, g in t.groupby('sitio'):
-        w(f"| {s} | {g.base.iloc[0]} | {g.fabricante.iloc[0]} {g.modelo.iloc[0] if isinstance(g.modelo.iloc[0], str) else ''} {f(g.campo.iloc[0], 0) if pd.notna(g.campo.iloc[0]) else ''}T | {len(g)} | "
+        scn = f"{g.fabricante.iloc[0]} {g.modelo.iloc[0] if isinstance(g.modelo.iloc[0], str) else ''} {f(g.campo.iloc[0], 0) if pd.notna(g.campo.iloc[0]) else ''}T" if isinstance(g.fabricante.iloc[0], str) else 'não informado'
+        w(f"| {s} | {g.base.iloc[0]} | {scn} | {len(g)} | "
           f"{f(g.idade.min(), 0)}–{f(g.idade.max(), 0)} | {int((g.sexo == 'F').sum())}/{int((g.sexo == 'M').sum())} |")
     w('')
     ct = pd.crosstab(t.decada, t.sexo)
@@ -132,12 +146,12 @@ def main():
     df = t.join(zp, how='left')
     w('## 3. Sítio não visto: própria × pipeline atual')
     w('')
-    w('Mesmos exames, cada sítio com n ≥ 10 deixado de fora do ajuste das normas próprias. Ideal num sítio '
+    w(('Exames de sítios que NÃO entraram no ajuste destas normas, avaliados pela curva populacional. ' if a.externo else 'Mesmos exames, cada sítio com n ≥ 10 deixado de fora do ajuste das normas próprias. ') + 'Ideal num sítio '
       'não visto: média ≈ 0, DP ≈ √(1 + σ_sítio²) e |z| > 1,96 em ≈ 5% × o excesso pelo sítio. "RMS sítio" = '
       'raiz da média dos quadrados das médias por sítio (viés típico de um sítio). A recentragem do pipeline '
       'atual foi ajustada no DLBS, por isso as métricas saem também sem ele.')
     w('')
-    for semDLBS in (False, True):
+    for semDLBS in ((False,) if a.externo else (False, True)):
         d = df[df.sitio != 'dlbs'] if semDLBS else df
         w(f"### {'Sem o DLBS' if semDLBS else 'Todos os sítios'} ({len(d)} exames)")
         w('')
