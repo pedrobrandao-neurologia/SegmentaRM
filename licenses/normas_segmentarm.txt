@@ -16,6 +16,16 @@ Dados de origem (todos CC0 1.0, OpenNeuro — https://openneuro.org):
 
 CC0 não exige atribuição; ainda assim, cite os conjuntos acima em trabalhos que usem estas normas.
 
+AMOSTRA AMPLIADA (models/normative/normas_segmentarm_ampliadas.json) — USO NÃO COMERCIAL
+Soma às bases acima 385 exames de 21 sítios do 1000 Functional Connectomes Project (INDI,
+distribuídos pelo NITRC e pelo S3 público fcp-indi), cuja licença é Creative Commons
+Atribuição-NãoComercial (CC BY-NC). O arquivo traz só coeficientes de curvas (nenhuma imagem,
+nenhum dado individual), mas, por derivar desses dados, deve ser usado apenas para fins não
+comerciais e com a citação:
+  Biswal BB et al. Toward discovery science of human brain function. PNAS 2010;107(10):4734–9.
+  doi:10.1073/pnas.0911855107
+Para uso sem essa restrição, escolha no app a amostra "só bases CC0" (normas_segmentarm.json).
+
 Se as normas forem reajustadas com o OASIS-3 (tools/normas_local.py), o uso fica sujeito ao
 OASIS Data Use Agreement aceito por quem baixou os dados, e o agradecimento exigido pelo OASIS
 vai junto no JSON (campo "bases").

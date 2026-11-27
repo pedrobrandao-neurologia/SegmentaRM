@@ -212,7 +212,7 @@ CentileBrain continuam como alternativa no painel; as parcelas corticais seguem 
    (0,2–0,3 z; 1,1 no corno temporal E) entra no IC. **O OASIS-3 (nível B) é o próximo passo:**
    `tools/normas_local.py --oasis3` já monta o manifesto a partir dos arquivos que o usuário
    baixar depois de aceitar os termos.
-2. **Só 3 T e só EUA/Europa** (Philips, Siemens, GE). Nada de 1,5 T nem de brasileiros: a
+2. **Só 3 T e só EUA/Europa** (Philips, Siemens, GE) na amostra CC0; a ampliada (§7) soma 8 países. Nada de 1,5 T nem de brasileiros: a
    calibração local continua recomendada.
 3. **Pálido:** depende do contraste. A variação entre sítios estimada é de 0,65–1,0 z, e o IC
    fica largo de acordo.
@@ -223,3 +223,58 @@ CentileBrain continuam como alternativa no painel; as parcelas corticais seguem 
    domina a de sítio. O IC desses itens fica só com o erro de medida e o da curva.
 6. **"Saudável" difere entre bases** (por exemplo, Alzheimer pré-clínico nos idosos; o PAN
    exclui só demência e doença psicótica).
+
+## 7. Ampliação da amostra (nov/2026)
+
+### O que mudou
+
+- **Tudo remedido e versionado.** Os 641 exames CC0 foram reprocessados e mais 385 do *1000
+  Functional Connectomes* (FCON1000, S3 público `fcp-indi`) entraram: 21 sítios de 8 países
+  (EUA 187, Canadá 86, Alemanha 28, China 25, Reino Unido 20, Finlândia 15, Austrália 12,
+  Holanda 12). Os números de cada exame (volumes suaves, VIC, idade, sexo, sítio — nenhuma
+  imagem) ficam em `dados/normas/resultados_*.jsonl`, de modo que o ajuste é reproduzível sem
+  baixar nada de novo. O lote roda em blocos retomáveis (`tools/normas_bloco.sh`).
+- **Dois arquivos de normas**, porque as licenças diferem:
+  `normas_segmentarm.json` (v1.1, só CC0, 641 exames, 14 sítios) e
+  `normas_segmentarm_ampliadas.json` (v2.0, 1026 exames, 35 sítios, **uso não comercial** por
+  incluir o FCON1000, CC BY-NC). O app usa a ampliada por padrão e oferece a troca no seletor
+  "amostra"; o relatório e o JSON de exportação registram qual foi usada e a licença dos dados.
+- Controles por década na ampliada: 311 (18–29), 101 (30–39), 89 (40–49), 160 (50–59),
+  156 (60–69), 146 (70–79), 63 (80–89); sítios por década: 29, 15, 9, 12, 13, 10 e 2.
+
+### O que a validação mostrou
+
+Médias das 19 medidas comuns: |média| · DP · |z| > 1,96 · RMS das médias por sítio.
+
+| Cenário | Normas SegmentaRM | Pipeline anterior (recentrado) |
+|---|---|---|
+| CC0, sítio deixado de fora (14 sítios) | 0,12 · 1,11 · 7,6% · 0,38 | 0,32 · 1,02 · 7,5% · 0,60 |
+| CC0 aplicada aos 385 exames do FCON (21 sítios nunca vistos) | 0,24 · 1,09 · 7,8% · 0,59 | 0,36 · 0,99 · 8,5% · 0,63 |
+| Ampliada, sítio deixado de fora (35 sítios) | 0,07 · 1,12 · 7,6% · 0,49 | 0,32 · 1,02 · 7,9% · 0,63 |
+
+1. A validação externa (segunda linha, `docs/validacao/normas_externa.md`) é o teste mais duro
+   feito até aqui: sítios, países e protocolos que a norma CC0 nunca viu. O viés médio continuou
+   menor que o do pipeline anterior, mas o viés típico de um sítio foi de 0,59 z, e não os 0,38
+   que os 14 sítios CC0 sugeriam. Ou seja: **a variância entre sítios da v1 estava subestimada**
+   e o IC 90% sem calibração, estreito demais.
+2. Com 35 sítios, a variância entre sítios estimada sobe (média de 0,027 para 0,033 em ln V;
+   hipocampo E de 0,025 para 0,035) e o IC 90% sem calibração fica mais largo e mais honesto.
+   O viés médio global num sítio deixado de fora cai para 0,07 z.
+3. Com controles locais as duas referências convergem (k = 30: RMS de 0,29 contra 0,27). A
+   calibração local continua sendo o que mais reduz o erro de sítio.
+
+### Limitações da ampliação
+
+1. **Scanner dos sítios do FCON não informado.** As planilhas no S3 trazem só idade e sexo;
+   fabricante e campo estão no NITRC, que o ambiente de construção não alcançava. Segundo a
+   publicação original, o consórcio reúne sítios de 1,5 T e de 3 T (não conferido aqui): isso
+   ajuda a estimar a variância entre sítios, mas não permite analisar por campo.
+2. **País não é etnia.** Nenhuma das bases abertas usadas publica etnia por participante; a
+   diversidade acrescentada é de país, scanner e protocolo. Não há sítio da América Latina, da
+   África nem do Sul da Ásia.
+3. **O FCON é jovem:** 151 dos 385 têm 40 anos ou mais e 58 têm 60 ou mais. Os 80+ ganharam só
+   2 exames; a década segue com 2 sítios e z em cinza. O OASIS-3 continua sendo o caminho.
+4. **SALD (China, 19–80 anos) ficou de fora:** as imagens estão no S3, mas a planilha de idade
+   e sexo só no NITRC.
+5. **VIC:** 915 exames de 33 sítios (111 com aviso no registro ficaram fora da norma do VIC).
+

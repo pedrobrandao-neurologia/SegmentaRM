@@ -19,6 +19,8 @@
 # dos seus exames pela curva populacional (sítio não visto). A adaptação com k controles do sítio e
 # a comparação com o pipeline atual ficam em tools/normas_relatorio.py.
 suppressMessages({ library(gamlss); library(jsonlite); library(nlme) })
+# acentos: em localidade "C" o JSON sairia com <c3><a3> no lugar de "ã"
+invisible(suppressWarnings(Sys.setlocale("LC_CTYPE", "C.UTF-8")))
 args <- commandArgs(TRUE)
 if (length(args) < 3) stop("uso: Rscript tools/normas_ajuste.R tabela.csv saida.json validacao_dir [B]")
 TAB <- args[1]; SAIDA <- args[2]; VDIR <- args[3]; B <- if (length(args) >= 4) as.integer(args[4]) else 40L

@@ -139,11 +139,21 @@
   },
   "normas_segmentarm": {
    "descricao": "Normas SegmentaRM: GAMLSS (SHASHo, sítio aleatório) em volumes do mesmo SynthSeg, bases abertas CC0",
-   "sha256": "7f6c03acc7591fa7fbc950901071d8e5ea77c33708905d3a2be157593e6ffbef",
+   "sha256": "073333b117c24a3fb7f2873bd8e6d9c26f478ddd0b9388a938f0a09cc9829082",
    "arquivos": [
     {
      "arquivo": "models/normative/normas_segmentarm.json",
-     "sha256": "ed738c3683a30d95b0668849ac3b04b6e4c065995f2785872149bf64ffff11d6"
+     "sha256": "0089eb289386be579a18f540cb424b532ee690b616fb2866af5a3b7ca8b543b4"
+    }
+   ]
+  },
+  "normas_segmentarm_ampliadas": {
+   "descricao": "Normas SegmentaRM ampliadas: bases CC0 + 1000 Functional Connectomes (uso não comercial)",
+   "sha256": "ae6b9b386aa25f64ef69ce10c97b702b80dd6936356ad5dccad3531ae36e0ebf",
+   "arquivos": [
+    {
+     "arquivo": "models/normative/normas_segmentarm_ampliadas.json",
+     "sha256": "b5f2ab818ad4f4d51b4377459f1a7d829f62779067456a8bcae59a07f477f083"
     }
    ]
   },
